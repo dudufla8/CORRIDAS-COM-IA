@@ -38,7 +38,7 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
   {
     id: 'unipar-voll',
     nomeExibicao: 'UNIPAR VOLL (Plataforma Voll)',
-    uiCliente: 'UNIPAR_VOLL',
+    uiCliente: '084dbe67-d889-49a6-af3e-8609d9122e23',
     palavrasChave: ['unipar voll', 'unipar', 'carbocloro', 'unipar-m', 'camaçari'],
     regras: [
       {
@@ -83,7 +83,7 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
   {
     id: 'unipar-direto',
     nomeExibicao: 'UNIPAR (Corporativo Direto)',
-    uiCliente: 'UNIPAR_DIRETO',
+    uiCliente: '4b5461d2-2dc4-4402-80a2-4ecbf97de9d7',
     palavrasChave: ['unipar direto', 'unipar carbocloro', 'cubatão', 'santo andré'],
     regras: [
       {
@@ -121,21 +121,22 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
   {
     id: 'claro-voll',
     nomeExibicao: 'CLARO VOLL (Plataforma Voll)',
-    uiCliente: 'CLARO_VOLL',
+    uiCliente: '94961e94-143a-49b8-a314-6db0bcb7a48d',
     palavrasChave: ['claro voll', 'claro', 'embratel', 'net claro', 'claro brasil'],
     regras: [
       {
         numeroCampo: 1,
         nomeExibicao: 'Código da Reserva / Chamado Claro',
-        descricaoAjuda: 'Número da reserva no app Voll',
+        descricaoAjuda: 'Número da reserva no app Voll (ex: #CLARO-M18456160)',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
       },
       {
         numeroCampo: 2,
         nomeExibicao: 'Centro de Custo Claro',
-        descricaoAjuda: 'Centro de custo contábil do colaborador Claro',
-        obrigatorio: true,
+        descricaoAjuda: 'Centro de custo contábil do colaborador Claro (opcional)',
+        obrigatorio: false,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
       {
@@ -157,7 +158,7 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
   {
     id: 'voll-geral',
     nomeExibicao: 'VOLL (Corporativo Geral)',
-    uiCliente: 'VOLL_GERAL',
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
     palavrasChave: ['voll', 'reserva voll', 'app voll', 'agendamento voll'],
     regras: [
       {
@@ -166,6 +167,7 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
         descricaoAjuda: 'Identificador do agendamento Voll',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
       },
       {
         numeroCampo: 2,
@@ -505,30 +507,37 @@ export const AiDispatchHub: React.FC = () => {
 
     setDespachando(true);
     try {
-      const res = await taxiClientRef.current.createBooking({
-        authorized_id: dadosAutorizado?.id || 'AUTH-9921',
-        passageiro_nome: formPassageiro.nome,
-        passageiro_telefone: formPassageiro.telefone,
-        imediata: formViagem.tipo === 'IMEDIATO',
-        data_hora_agendamento: `${formViagem.data} ${formViagem.hora}:00`,
-        origem: { endereco: formOrigem, latitude: -25.501, longitude: -49.201 },
-        destino: formDestino ? { endereco: formDestino, latitude: -23.654, longitude: -46.531 } : undefined,
-        tipo_pagamento: 'VOUCHER_DIGITAL',
-        classificadores: resultadoRules.classificadoresProntos,
-        observacoes: formObservacoes,
-        referencia_externa: `PORTAL-${Date.now()}`,
+      const response = await fetch('/api/taxi-digital/booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contratoId: contratoSelecionadoId,
+          passageiroNome: formPassageiro.nome,
+          passageiroTelefone: formPassageiro.telefone,
+          tipo: formViagem.tipo,
+          data: formViagem.data,
+          hora: formViagem.hora,
+          origem: formOrigem,
+          destino: formDestino,
+          classificadores: resultadoRules.classificadoresProntos,
+          observacoes: formObservacoes,
+        }),
       });
 
-      if (res.status) {
-        setResultadoDespacho({
-          bookingId: String(res.booking_id),
-          voucher: res.voucher_codigo || 'VCH-AUTO',
-          status: res.status_corrida || 'AGENDADA',
-        });
+      const res = await response.json().catch(() => ({}));
+
+      if (!response.ok || !res.status) {
+        throw new Error(res.error || 'A central Táxi Digital rejeitou o agendamento.');
       }
-    } catch (err) {
+
+      setResultadoDespacho({
+        bookingId: String(res.booking_id),
+        voucher: res.voucher || 'VCH-AUTO',
+        status: res.status_corrida || 'AGENDADA',
+      });
+    } catch (err: any) {
       console.error('Falha no despacho:', err);
-      alert('Erro ao despachar corrida para a API Táxi Digital.');
+      alert('Aviso da Central Táxi Digital: ' + (err.message || 'Falha ao agendar corrida.'));
     } finally {
       setDespachando(false);
     }

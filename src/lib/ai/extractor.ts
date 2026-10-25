@@ -6,16 +6,19 @@ Você é o Motor de Inteligência Artificial Operacional do Portal Táxi 2.0, es
 Sua missão é receber capturas de tela (prints de e-mails, chamados, plataformas como Voll, Reserve, SAP Concur, WhatsApp corporativo) ou textos livres e extrair com precisão cirúrgica todas as entidades para o agendamento da corrida.
 
 DIRETRIZES DE EXTRAÇÃO:
-1. PASSAGEIRO/VIAJANTE: Extraia o nome completo (ex: "ELIANE RAMOS MACIEL DA SILVA"), telefone com DDD (ex: "71981894584") e matrícula/identificador se presente.
-2. DATA E HORA: Sempre no fuso de Brasília (UTC-3). Converta datas como "qui, 22 de out. de 2026" para o formato ISO YYYY-MM-DD. Converta horário "08:00" para HH:MM.
+1. PASSAGEIRO/VIAJANTE: Extraia o nome completo (ex: "CARLOS EDUARDO DE AMORIM" ou "ELIANE RAMOS MACIEL DA SILVA"), telefone com DDD (ex: "21968140578") e matrícula/identificador se presente.
+2. DATA E HORA: Sempre no fuso de Brasília (UTC-3). Converta datas como "seg., 26 de out. de 2026" para o formato ISO YYYY-MM-DD (2026-10-26). Converta horário "05:30" para HH:MM.
 3. ORIGEM E DESTINO: Extraia o endereço completo de embarque (origem) e desembarque (destino), separando rua, número, bairro, cidade e UF quando visível.
-4. CLASSIFICADORES: Extraia o Código da OS / Agendamento (ex: "#UNIPAR-M18368822" ou similar), Centro de Custo e Projeto.
+4. CLASSIFICADORES & CÓDIGO DO AGENDAMENTO (REGRA CRÍTICA):
+   - "codigoOsChamado": É SEMPRE o código alfanumérico do chamado/reserva localizado no topo ou título da solicitação, normalmente precedido de "#" ou no formato LETRAS-LETRAS_E_NUMEROS (ex: "#CLARO-M18456160", "#UNIPAR-M18079298", "#UNIPAR-M18368822").
+   - ATENÇÃO ABSOLUTA: O "codigoOsChamado" NUNCA é o nome de uma pessoa/viajante!
+   - "centroCusto": Preencha SOMENTE se houver uma indicação clara de centro de custo ("Centro de Custo:", "CC:"). Se não houver, deixe string vazia "". NUNCA coloque o código da OS como centro de custo.
 5. SAÍDA OBRIGATÓRIA: Responda SOMENTE um JSON válido com a seguinte estrutura:
 {
-  "empresaIdentificada": "Nome da Empresa",
+  "empresaIdentificada": "Nome da Empresa (ex: CLARO VOLL, UNIPAR VOLL, UNIPAR)",
   "canalOrigem": "PRINT_OCR",
   "passageiro": {
-    "nome": "Nome completo extraído",
+    "nome": "Nome completo do viajante",
     "telefone": "(XX) XXXXX-XXXX",
     "identificador": "Matrícula/ID se houver"
   },
@@ -42,9 +45,9 @@ DIRETRIZES DE EXTRAÇÃO:
     "uf": "UF"
   },
   "classificadores": {
-    "codigoOsChamado": "#UNIPAR-M18368822",
-    "centroCusto": "Centro de Custo se houver",
-    "projeto": "Projeto se houver"
+    "codigoOsChamado": "#CLARO-M18456160",
+    "centroCusto": "",
+    "projeto": ""
   },
   "observacoesOperacionais": "Observações da corrida",
   "scoreConfianca": 0.98,
@@ -78,15 +81,51 @@ export class AiDispatchExtractorService {
     }
 
     try {
+      let resultado: RideExtractionData;
       if (this.provider === 'GEMINI') {
-        return await this.chamarGeminiMultimodal(input, dataRef);
+        resultado = await this.chamarGeminiMultimodal(input, dataRef);
       } else {
-        return await this.chamarOpenAiMultimodal(input, dataRef);
+        resultado = await this.chamarOpenAiMultimodal(input, dataRef);
       }
+      return this.sanitizarDadosExtraidos(resultado);
     } catch (error: any) {
       console.error('[AI Extractor] Erro na chamada à API de IA:', error);
       throw new Error(error.message || 'Falha ao processar com a IA.');
     }
+  }
+
+  private sanitizarDadosExtraidos(dados: RideExtractionData): RideExtractionData {
+    const nomePassageiro = dados.passageiro?.nome?.trim().toUpperCase() || '';
+    let codigoOs = dados.classificadores?.codigoOsChamado?.trim() || '';
+    let centroCusto = dados.classificadores?.centroCusto?.trim() || '';
+
+    const regexCodigoChamado = /#?([A-Za-z0-9]+-[A-Za-z0-9]+)/;
+
+    // Se o centro de custo contiver o código do chamado (ex: #CLARO-M18456160)
+    // e o código da OS estiver com o nome da pessoa ou vazio, corrige imediatamente
+    if (regexCodigoChamado.test(centroCusto) && (!codigoOs || codigoOs.toUpperCase() === nomePassageiro || !regexCodigoChamado.test(codigoOs))) {
+      codigoOs = centroCusto;
+      centroCusto = '';
+    }
+
+    // Se o código da OS for exatamente igual ao nome do passageiro, anula
+    if (codigoOs && codigoOs.toUpperCase() === nomePassageiro) {
+      codigoOs = '';
+    }
+
+    if (dados.classificadores) {
+      dados.classificadores.codigoOsChamado = codigoOs;
+      dados.classificadores.centroCusto = centroCusto;
+    }
+
+    // Detecção da empresa com base no código
+    if (codigoOs.toUpperCase().includes('CLARO') || dados.empresaIdentificada?.toUpperCase().includes('CLARO')) {
+      dados.empresaIdentificada = 'CLARO VOLL';
+    } else if (codigoOs.toUpperCase().includes('UNIPAR') || dados.empresaIdentificada?.toUpperCase().includes('UNIPAR')) {
+      dados.empresaIdentificada = 'UNIPAR VOLL';
+    }
+
+    return dados;
   }
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {

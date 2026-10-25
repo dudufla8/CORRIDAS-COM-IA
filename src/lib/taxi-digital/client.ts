@@ -152,15 +152,9 @@ export class TaxiDigitalApiClient {
     };
 
     if (this.mockMode) {
-      return {
-        status: true,
-        booking_id: `TD-${Math.floor(100000 + Math.random() * 900000)}`,
-        voucher_codigo: `VCH-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-        status_corrida: params.imediata ? 'EM_DESPACHO' : 'AGENDADA',
-        previsao_chegada_motorista_minutos: params.imediata ? 6 : undefined,
-        valor_estimado: 78.50,
-        message: 'Corrida corporativa agendada com sucesso na rede Táxi Digital.',
-      };
+      throw new Error(
+        'Acesso direto ao cliente Táxi Digital sem credenciais. O agendamento deve ser efetuado através da rota de servidor segura /api/taxi-digital/booking.'
+      );
     }
 
     const response = await this.http.post<CreateBookingResponse>(
