@@ -35,10 +35,10 @@ export interface ContratoCorporativo {
 
 export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
   {
-    id: 'unipar-camacari',
-    nomeExibicao: 'Unipar Carbocloro - Filial Camaçari / BA',
-    uiCliente: 'UNIPAR_CAMACARI_01',
-    palavrasChave: ['unipar', 'carbocloro', 'camaçari', 'camacari', 'bahia', 'ba'],
+    id: 'unipar-voll',
+    nomeExibicao: 'UNIPAR VOLL (Plataforma Voll)',
+    uiCliente: 'UNIPAR_VOLL',
+    palavrasChave: ['unipar voll', 'unipar', 'carbocloro', 'unipar-m', 'camaçari'],
     regras: [
       {
         numeroCampo: 1,
@@ -57,8 +57,8 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
       },
       {
         numeroCampo: 3,
-        nomeExibicao: 'Projeto / Subprojeto',
-        descricaoAjuda: 'Nome da planta ou projeto corporativo',
+        nomeExibicao: 'Projeto / Solicitação',
+        descricaoAjuda: 'Nome do projeto ou finalidade da viagem',
         obrigatorio: false,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
@@ -80,10 +80,10 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     ],
   },
   {
-    id: 'unipar-cubatao',
-    nomeExibicao: 'Unipar Carbocloro - Filial Cubatão / SP',
-    uiCliente: 'UNIPAR_SP_01',
-    palavrasChave: ['cubatão', 'cubatao', 'são paulo', 'sp', 'santo andré', 'capuava'],
+    id: 'unipar-direto',
+    nomeExibicao: 'UNIPAR (Corporativo Direto)',
+    uiCliente: 'UNIPAR_DIRETO',
+    palavrasChave: ['unipar direto', 'unipar carbocloro', 'cubatão', 'santo andré'],
     regras: [
       {
         numeroCampo: 1,
@@ -102,7 +102,7 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
       },
       {
         numeroCampo: 3,
-        nomeExibicao: 'Projeto / Planta',
+        nomeExibicao: 'Projeto / Planta Industrial',
         descricaoAjuda: 'Nome da planta ou projeto corporativo',
         obrigatorio: false,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
@@ -114,6 +114,78 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
         obrigatorio: true,
         tipoPreenchimento: 'VALOR_FIXO_CONTRATO',
         valorFixo: 'UNIPAR CUBATÃO / SP',
+      },
+    ],
+  },
+  {
+    id: 'claro-voll',
+    nomeExibicao: 'CLARO VOLL (Plataforma Voll)',
+    uiCliente: 'CLARO_VOLL',
+    palavrasChave: ['claro voll', 'claro', 'embratel', 'net claro', 'claro brasil'],
+    regras: [
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Código da Reserva / Chamado Claro',
+        descricaoAjuda: 'Número da reserva no app Voll',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Centro de Custo Claro',
+        descricaoAjuda: 'Centro de custo contábil do colaborador Claro',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Regional / Unidade',
+        descricaoAjuda: 'Filial ou Regional Claro',
+        obrigatorio: false,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 4,
+        nomeExibicao: 'Motivo da Corrida',
+        descricaoAjuda: 'Finalidade do deslocamento corporativo',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+    ],
+  },
+  {
+    id: 'voll-geral',
+    nomeExibicao: 'VOLL (Corporativo Geral)',
+    uiCliente: 'VOLL_GERAL',
+    palavrasChave: ['voll', 'reserva voll', 'app voll', 'agendamento voll'],
+    regras: [
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Código da Reserva / Voucher Voll',
+        descricaoAjuda: 'Identificador do agendamento Voll',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Centro de Custo',
+        descricaoAjuda: 'Centro de custo informado na solicitação',
+        obrigatorio: false,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Projeto / Motivo da Viagem',
+        descricaoAjuda: 'Finalidade da viagem',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+      {
+        numeroCampo: 4,
+        nomeExibicao: 'Solicitante / Aprovador',
+        descricaoAjuda: 'Nome do gestor ou solicitante',
+        obrigatorio: false,
+        tipoPreenchimento: 'HERDADO_AUTORIZADO',
       },
     ],
   },
@@ -155,7 +227,7 @@ export const AiDispatchHub: React.FC = () => {
   const [isProcessingAi, setIsProcessingAi] = useState(false);
 
   // CONTRATOS DINÂMICOS
-  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('unipar-camacari');
+  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('unipar-voll');
   const [contratoAutoDetectado, setContratoAutoDetectado] = useState(false);
 
   const [extractedData, setExtractedData] = useState<RideExtractionData | null>(null);
