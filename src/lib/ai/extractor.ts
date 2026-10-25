@@ -72,8 +72,9 @@ export class AiDispatchExtractorService {
     const dataRef = input.dataReferenciaIso || new Date().toISOString();
 
     if (!this.apiKey) {
-      console.warn('[AI Extractor] Nenhuma API KEY encontrada no servidor. Usando modo simulação.');
-      return this.extrairModoDesenvolvimento(input, dataRef);
+      throw new Error(
+        'A variável de ambiente GEMINI_API_KEY não foi encontrada no servidor da Vercel. Por favor, adicione GEMINI_API_KEY no painel da Vercel (Settings > Environment Variables) e faça um Redeploy.'
+      );
     }
 
     try {
@@ -82,14 +83,29 @@ export class AiDispatchExtractorService {
       } else {
         return await this.chamarOpenAiMultimodal(input, dataRef);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('[AI Extractor] Erro na chamada à API de IA:', error);
-      throw error;
+      throw new Error(error.message || 'Falha ao processar com a IA.');
     }
   }
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
-    const model = process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+    const models = Array.from(new Set([process.env.GEMINI_MODEL, 'gemini-1.5-flash', 'gemini-1.5-pro'].filter(Boolean))) as string[];
+    let lastError: any = null;
+
+    for (const model of models) {
+      try {
+        return await this.executarChamadaGemini(input, dataRef, model);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[Gemini API] Falha no modelo ${model}:`, err.message);
+      }
+    }
+
+    throw lastError || new Error('Não foi possível obter resposta válida da IA Gemini.');
+  }
+
+  private async executarChamadaGemini(input: ExtractionInput, dataRef: string, model: string): Promise<RideExtractionData> {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
     const parts: any[] = [
       { text: `${SYSTEM_PROMPT_DESPACHO_B2B}\n\nData e hora atual de referência: ${dataRef}` }
@@ -124,15 +140,22 @@ export class AiDispatchExtractorService {
 
     const jsonResp = await response.json();
     if (!response.ok || jsonResp.error) {
-      throw new Error(jsonResp.error?.message || `Erro da API Gemini: ${response.statusText}`);
+      throw new Error(jsonResp.error?.message || `Erro da API Gemini (${model}): ${response.statusText}`);
     }
 
     const rawText = jsonResp.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawText) {
-      throw new Error('A IA não retornou nenhum texto estruturado.');
+      throw new Error(`O modelo ${model} não retornou nenhum texto estruturado.`);
     }
 
-    const parsedJson = JSON.parse(rawText);
+    let cleanJson = rawText.trim();
+    if (cleanJson.startsWith('```json')) {
+      cleanJson = cleanJson.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (cleanJson.startsWith('```')) {
+      cleanJson = cleanJson.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+
+    const parsedJson = JSON.parse(cleanJson);
     return RideExtractionSchema.parse(parsedJson);
   }
 

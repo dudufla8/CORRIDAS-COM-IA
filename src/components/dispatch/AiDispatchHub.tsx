@@ -16,6 +16,8 @@ import {
   RefreshCw,
   Info,
   ShieldCheck,
+  Building2,
+  Trash2,
 } from 'lucide-react';
 import { RideExtractionData } from '../../lib/ai/schema';
 import { AiDispatchExtractorService } from '../../lib/ai/extractor';
@@ -23,43 +25,126 @@ import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } fro
 import { TaxiDigitalApiClient } from '../../lib/taxi-digital/client';
 import { ClassificationRuleValidator } from './ClassificationRuleValidator';
 
-const REGRAS_EXEMPLO_CONTRATO: RegraClassificadorItem[] = [
+export interface ContratoCorporativo {
+  id: string;
+  nomeExibicao: string;
+  uiCliente: string;
+  palavrasChave: string[];
+  regras: RegraClassificadorItem[];
+}
+
+export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
   {
-    numeroCampo: 1,
-    nomeExibicao: 'Código da Ordem de Serviço (OS)',
-    descricaoAjuda: 'Código identificador no formato #UNIPAR-M2026',
-    obrigatorio: true,
-    tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-    regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
+    id: 'unipar-camacari',
+    nomeExibicao: 'Unipar Carbocloro - Filial Camaçari / BA',
+    uiCliente: 'UNIPAR_CAMACARI_01',
+    palavrasChave: ['unipar', 'carbocloro', 'camaçari', 'camacari', 'bahia', 'ba'],
+    regras: [
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Código do Agendamento / OS',
+        descricaoAjuda: 'Código da ordem no formato #UNIPAR-M18368822',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Centro de Custo / Área',
+        descricaoAjuda: 'Centro contábil responsável pelo faturamento',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Projeto / Subprojeto',
+        descricaoAjuda: 'Nome da planta ou projeto corporativo',
+        obrigatorio: false,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 4,
+        nomeExibicao: 'Filial de Faturamento',
+        descricaoAjuda: 'Unidade operacional fixa',
+        obrigatorio: true,
+        tipoPreenchimento: 'VALOR_FIXO_CONTRATO',
+        valorFixo: 'UNIPAR CAMAÇARI / BA',
+      },
+      {
+        numeroCampo: 5,
+        nomeExibicao: 'Matrícula do Aprovador',
+        descricaoAjuda: 'Herdada do cadastro do passageiro',
+        obrigatorio: false,
+        tipoPreenchimento: 'HERDADO_AUTORIZADO',
+      },
+    ],
   },
   {
-    numeroCampo: 2,
-    nomeExibicao: 'Centro de Custo',
-    descricaoAjuda: 'Centro contábil responsável pelo faturamento',
-    obrigatorio: true,
-    tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+    id: 'unipar-cubatao',
+    nomeExibicao: 'Unipar Carbocloro - Filial Cubatão / SP',
+    uiCliente: 'UNIPAR_SP_01',
+    palavrasChave: ['cubatão', 'cubatao', 'são paulo', 'sp', 'santo andré', 'capuava'],
+    regras: [
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Código da Ordem de Serviço (OS)',
+        descricaoAjuda: 'Código identificador no formato #UNIPAR-M2026',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Centro de Custo',
+        descricaoAjuda: 'Centro contábil responsável pelo faturamento',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Projeto / Planta',
+        descricaoAjuda: 'Nome da planta ou projeto corporativo',
+        obrigatorio: false,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 4,
+        nomeExibicao: 'Filial de Origem',
+        descricaoAjuda: 'Unidade operacional fixa',
+        obrigatorio: true,
+        tipoPreenchimento: 'VALOR_FIXO_CONTRATO',
+        valorFixo: 'UNIPAR CUBATÃO / SP',
+      },
+    ],
   },
   {
-    numeroCampo: 3,
-    nomeExibicao: 'Projeto / Subprojeto',
-    descricaoAjuda: 'Nome da planta ou projeto corporativo',
-    obrigatorio: false,
-    tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-  },
-  {
-    numeroCampo: 4,
-    nomeExibicao: 'Filial de Origem',
-    descricaoAjuda: 'Unidade operacional fixa',
-    obrigatorio: true,
-    tipoPreenchimento: 'VALOR_FIXO_CONTRATO',
-    valorFixo: 'UNIPAR CUBATÃO / SP',
-  },
-  {
-    numeroCampo: 5,
-    nomeExibicao: 'Matrícula do Aprovador',
-    descricaoAjuda: 'Herdada do cadastro do passageiro',
-    obrigatorio: false,
-    tipoPreenchimento: 'HERDADO_AUTORIZADO',
+    id: 'padrao-b2b',
+    nomeExibicao: 'Contrato Padrão B2B (Táxi 2.0)',
+    uiCliente: 'CLIENTE_PADRAO_01',
+    palavrasChave: [],
+    regras: [
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Código do Chamado / OS',
+        descricaoAjuda: 'Número identificador do agendamento',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Centro de Custo',
+        descricaoAjuda: 'Centro contábil',
+        obrigatorio: false,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Motivo da Viagem',
+        descricaoAjuda: 'Finalidade da corrida',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+    ],
   },
 ];
 
@@ -68,6 +153,10 @@ export const AiDispatchHub: React.FC = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   const [isProcessingAi, setIsProcessingAi] = useState(false);
+
+  // CONTRATOS DINÂMICOS
+  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('unipar-camacari');
+  const [contratoAutoDetectado, setContratoAutoDetectado] = useState(false);
 
   const [extractedData, setExtractedData] = useState<RideExtractionData | null>(null);
   const [formPassageiro, setFormPassageiro] = useState({ nome: '', telefone: '', identificador: '' });
@@ -88,14 +177,16 @@ export const AiDispatchHub: React.FC = () => {
   const extractorRef = useRef(new AiDispatchExtractorService());
   const taxiClientRef = useRef(new TaxiDigitalApiClient());
 
+  const contratoAtual = CONTRATOS_DISPONIVEIS.find((c) => c.id === contratoSelecionadoId) || CONTRATOS_DISPONIVEIS[0];
+
   const resultadoRules: ResultadoRuleEngine = ClassifierRuleEngine.executar(
-    REGRAS_EXEMPLO_CONTRATO,
+    contratoAtual.regras,
     extractedData || undefined,
     dadosAutorizado,
     valoresManuais
   );
 
-  // LISTENER DE CTRL+V (PASTE CLIPBOARD)
+  // LISTENER DE CTRL+V (PASTE CLIPBOARD) - APENAS CARREGA A IMAGEM, SEM GASTAR TOKEN AUTOMÁTICO
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
       const items = event.clipboardData?.items;
@@ -112,7 +203,7 @@ export const AiDispatchHub: React.FC = () => {
               const base64 = e.target?.result as string;
               setImagePreview(base64);
               setActiveTab('PRINT');
-              processarExtracaoImagem(base64);
+              // Usuário escolhe quando clicar no botão "Analisar com IA"
             };
             reader.readAsDataURL(file);
             break;
@@ -132,7 +223,6 @@ export const AiDispatchHub: React.FC = () => {
       reader.onload = (ev) => {
         const base64 = ev.target?.result as string;
         setImagePreview(base64);
-        processarExtracaoImagem(base64);
       };
       reader.readAsDataURL(file);
     }
@@ -210,6 +300,18 @@ export const AiDispatchHub: React.FC = () => {
     setFormOrigem(dados.origem.enderecoCompleto);
     setFormDestino(dados.destino?.enderecoCompleto || '');
     setFormObservacoes(dados.observacoesOperacionais || '');
+
+    // Auto-detecção inteligente do contrato da empresa
+    const textoBusca = `${dados.empresaIdentificada || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''} ${dados.classificadores?.codigoOsChamado || ''}`.toLowerCase();
+    
+    const contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) =>
+      c.palavrasChave.some((kw) => textoBusca.includes(kw.toLowerCase()))
+    );
+
+    if (contratoDetectado) {
+      setContratoSelecionadoId(contratoDetectado.id);
+      setContratoAutoDetectado(true);
+    }
 
     consultarAutorizado(dados.passageiro.identificador || dados.passageiro.nome);
     calcularEstimativaRota(dados.origem.enderecoCompleto, dados.destino?.enderecoCompleto);
@@ -406,35 +508,73 @@ export const AiDispatchHub: React.FC = () => {
             </div>
 
             {activeTab === 'PRINT' && (
-              <div
-                className={`relative border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
-                  imagePreview ? 'border-amber-400 bg-amber-50/20' : 'border-slate-300 hover:border-amber-400'
-                }`}
-              >
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
+              <div className="space-y-3">
                 {imagePreview ? (
-                  <div className="space-y-3">
-                    <div className="max-h-56 overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+                  <div className="space-y-3 p-4 rounded-2xl border-2 border-amber-400 bg-amber-50/20 text-center">
+                    <div className="max-h-60 overflow-hidden rounded-xl border border-slate-200 bg-slate-900/5 shadow-inner">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={imagePreview} alt="Screenshot" className="w-full object-contain" />
+                      <img src={imagePreview} alt="Screenshot capturado" className="w-full max-h-60 object-contain mx-auto" />
                     </div>
-                    <div className="text-xs font-semibold text-amber-800">
-                      Print capturado! Pressione Ctrl+V para trocar.
+
+                    <div className="text-xs font-bold text-amber-900 bg-amber-100/70 py-1.5 px-3 rounded-lg border border-amber-200/80">
+                      📸 Print capturado com sucesso!
+                    </div>
+
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button
+                        type="button"
+                        disabled={isProcessingAi}
+                        onClick={() => processarExtracaoImagem(imagePreview)}
+                        className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-600 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer"
+                      >
+                        {isProcessingAi ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                            Lendo print com Gemini Pro (OCR)...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4 fill-slate-950 text-slate-950" />
+                            ✨ Analisar Imagem com Gemini Pro
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isProcessingAi}
+                        onClick={() => {
+                          setImagePreview(null);
+                          setExtractedData(null);
+                        }}
+                        className="w-full py-2 text-xs font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Remover imagem / Trocar print
+                      </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-3 py-4">
-                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 mx-auto flex items-center justify-center">
-                      <Upload className="w-6 h-6" />
+                  <div className="relative border-2 border-dashed rounded-2xl p-8 text-center border-slate-300 hover:border-amber-400 bg-slate-50/50 hover:bg-amber-50/10 transition-all cursor-pointer">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileUpload}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <div className="space-y-3 py-2 pointer-events-none">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 mx-auto flex items-center justify-center shadow-sm">
+                        <Upload className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">
+                          Cole seu print diretamente aqui (<span className="text-amber-600 font-mono">Ctrl+V</span>)
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          ou clique aqui para selecionar um arquivo de imagem
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs font-bold text-slate-800">
-                      Cole seu print diretamente aqui (<span className="text-amber-600 font-mono">Ctrl+V</span>)
-                    </p>
                   </div>
                 )}
               </div>
@@ -534,6 +674,43 @@ export const AiDispatchHub: React.FC = () => {
                   Autorizado: ATIVO (24)
                 </span>
               )}
+            </div>
+
+            {/* SELETOR DE CONTRATO B2B E CLASSIFICADORES */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4 text-amber-600" />
+                  Contrato Corporativo Selecionado
+                </label>
+                {contratoAutoDetectado ? (
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-emerald-600" /> Auto-identificado pela IA
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    ID Táxi Digital: <span className="font-mono text-slate-600 font-bold">{contratoAtual.uiCliente}</span>
+                  </span>
+                )}
+              </div>
+              <select
+                value={contratoSelecionadoId}
+                onChange={(e) => {
+                  setContratoSelecionadoId(e.target.value);
+                  setContratoAutoDetectado(false);
+                }}
+                className="w-full px-3 py-2.5 text-xs font-bold rounded-xl border border-slate-300 bg-white text-slate-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none shadow-sm cursor-pointer"
+              >
+                {CONTRATOS_DISPONIVEIS.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nomeExibicao} — ({c.regras.length} classificadores configurados)
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                <Info className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                Os classificadores 1 a 20 abaixo carregam os nomes e regras específicas deste contrato.
+              </p>
             </div>
 
             <div className="space-y-3">
