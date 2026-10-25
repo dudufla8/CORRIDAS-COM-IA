@@ -90,7 +90,15 @@ export class AiDispatchExtractorService {
   }
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
-    const models = Array.from(new Set([process.env.GEMINI_MODEL, 'gemini-1.5-flash', 'gemini-1.5-pro'].filter(Boolean))) as string[];
+    const models = Array.from(new Set([
+      process.env.GEMINI_MODEL,
+      'gemini-3.8-flash',
+      'gemini-flash-latest',
+      'gemini-2.5-flash',
+      'gemini-pro-latest',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
+    ].filter(Boolean))) as string[];
     let lastError: any = null;
 
     for (const model of models) {
