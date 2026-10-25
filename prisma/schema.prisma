@@ -1,0 +1,214 @@
+// ==============================================================================
+// SCHEMA DO BANCO DE DADOS - PORTAL DE DESPACHO INTELIGENTE B2B (TÁXI 2.0)
+// ORM: Prisma | SGBD: PostgreSQL
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum StatusContrato {
+  ATIVO
+  BLOQUEADO
+  INATIVO
+  PENDENTE_CADASTRO
+}
+
+enum TipoPreenchimentoClassificador {
+  EXTRAIDO_IA_REGEX      // Capturado via prompt/regex do print ou texto
+  HERDADO_AUTORIZADO     // Extraído do cadastro do passageiro (check_authorized)
+  VALOR_FIXO_CONTRATO    // Valor padrão estático do contrato/filial
+  LISTA_SUSPENSA         // Seleção obrigatória a partir de opções válidas
+  MANUAL_LIVRE           // Operador pode digitar livremente
+}
+
+enum StatusAutorizadoTD {
+  ATIVO                  // Código 24 na API Táxi Digital
+  INATIVO
+  BLOQUEADO
+  NAO_ENCONTRADO
+}
+
+enum CanalEntradaCorrida {
+  PRINT_OCR_VISION       // Upload ou Ctrl+V de screenshot / print
+  TEXTO_LIVRE_IA         // Prompt de texto em linguagem natural
+  AUDIO_TRANSCRICAO      // Gravação de voz / áudio do operador
+  DOCUMENTO_PDF_CSV      // Importação de OS em PDF ou planilha
+  WEBHOOK_EMAIL          // Ingestão silenciosa via e-mail ou webhook
+  MANUAL_ASSISTIDO       // Preenchimento assistido no formulário
+}
+
+enum StatusCorrida {
+  RASCUNHO               // Extraído pela IA, aguardando validação
+  VALIDADO               // Regras de negócio e classificadores validados
+  AGENDADO_TAXI_DIGITAL  // Transmitido com sucesso para a Táxi Digital
+  EM_ANDAMENTO           // Corrida em atendimento pela frota
+  CONCLUIDA              // Corrida finalizada com sucesso
+  CANCELADA              // Cancelada no portal ou na operadora
+  FALHA_DESPACHO         // Erro na API Táxi Digital (rejeição de voucher, etc.)
+}
+
+enum FormaPagamentoB2B {
+  FATURADO_VOUCHER_DIGITAL
+  FATURADO_BOLETO
+  CARTAO_CORPORATIVO
+}
+
+model Empresa {
+  id              String         @id @default(uuid()) @db.Uuid
+  nomeRazaoSocial String         @map("nome_razao_social") @db.VarChar(255)
+  nomeFantasia    String         @map("nome_fantasia") @db.VarChar(255)
+  cnpj            String         @unique @db.VarChar(18)
+  slug            String         @unique @db.VarChar(100)
+  emailContato    String?        @map("email_contato") @db.VarChar(255)
+  telefoneContato String?        @map("telefone_contato") @db.VarChar(50)
+  ativo           Boolean        @default(true)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  contratos       Contrato[]
+
+  @@map("empresas")
+}
+
+model Contrato {
+  id                   String             @id @default(uuid()) @db.Uuid
+  empresaId            String             @map("empresa_id") @db.Uuid
+  codigoContrato       String             @map("codigo_contrato") @db.VarChar(100)
+  descricao            String             @db.VarChar(255)
+  uiClienteTaxiDigital String             @map("ui_cliente_taxi_digital") @db.VarChar(100)
+  status               StatusContrato     @default(ATIVO)
+  formaPagamento       FormaPagamentoB2B  @default(FATURADO_VOUCHER_DIGITAL) @map("forma_pagamento")
+  centroCustoPadrao    String?            @map("centro_custo_padrao") @db.VarChar(100)
+  permiteAgendamento   Boolean            @default(true) @map("permite_agendamento")
+  exigeDestino         Boolean            @default(true) @map("exige_destino")
+  
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  empresa              Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  regrasClassificador  RegraClassificador[]
+  autorizados          Autorizado[]
+  historicoCorridas    HistoricoCorrida[]
+
+  @@unique([empresaId, codigoContrato])
+  @@index([uiClienteTaxiDigital])
+  @@map("contratos")
+}
+
+model RegraClassificador {
+  id                String                          @id @default(uuid()) @db.Uuid
+  contratoId        String                          @map("contrato_id") @db.Uuid
+  numeroCampo       Int                             @map("numero_campo") // 1 a 20
+  nomeExibicao      String                          @map("nome_exibicao") @db.VarChar(100)
+  descricaoAjuda    String?                         @map("descricao_ajuda") @db.VarChar(255)
+  obrigatorio       Boolean                         @default(false)
+  tipoPreenchimento TipoPreenchimentoClassificador @default(MANUAL_LIVRE) @map("tipo_preenchimento")
+  regexPadrao       String?                         @map("regex_padrao") @db.VarChar(255)
+  promptDicaIa      String?                         @map("prompt_dica_ia") @db.Text
+  valorFixo         String?                         @map("valor_fixo") @db.VarChar(255)
+  opcoesValidasJson Json?                           @map("opcoes_validas_json")
+  ativo             Boolean                         @default(true)
+  createdAt         DateTime                        @default(now()) @map("created_at")
+  updatedAt         DateTime                        @updatedAt @map("updated_at")
+
+  contrato          Contrato                        @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  @@unique([contratoId, numeroCampo])
+  @@map("regras_classificadores")
+}
+
+model Autorizado {
+  id                     String              @id @default(uuid()) @db.Uuid
+  contratoId             String              @map("contrato_id") @db.Uuid
+  taxiDigitalUserId      String?             @map("taxi_digital_user_id") @db.VarChar(100)
+  nomeCompleto           String              @map("nome_completo") @db.VarChar(255)
+  matriculaFuncional     String?             @map("matricula_funcional") @db.VarChar(100)
+  cpf                    String?             @db.VarChar(14)
+  telefoneWhatsApp       String              @map("telefone_whatsapp") @db.VarChar(30)
+  emailCorporativo       String?             @map("email_corporativo") @db.VarChar(255)
+  departamento           String?             @db.VarChar(100)
+  centroCusto            String?             @map("centro_custo") @db.VarChar(100)
+  statusApi              StatusAutorizadoTD  @default(ATIVO) @map("status_api")
+  codigoStatusApi        Int                 @default(24) @map("codigo_status_api") // 24 = ATIVO
+  classificadoresPadrao  Json?               @map("classificadores_padrao")
+  ultimaValidacaoApi     DateTime?           @map("ultima_validacao_api")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+
+  contrato               Contrato            @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  historicoCorridas      HistoricoCorrida[]
+
+  @@index([contratoId, matriculaFuncional])
+  @@index([contratoId, telefoneWhatsApp])
+  @@map("autorizados")
+}
+
+model HistoricoCorrida {
+  id                     String              @id @default(uuid()) @db.Uuid
+  contratoId             String              @map("contrato_id") @db.Uuid
+  autorizadoId           String?             @map("autorizado_id") @db.Uuid
+  bookingIdTaxiDigital   String?             @map("booking_id_taxi_digital") @db.VarChar(100)
+  voucherCodigo          String?             @map("voucher_codigo") @db.VarChar(100)
+  canalEntrada           CanalEntradaCorrida @map("canal_entrada")
+  statusCorrida          StatusCorrida       @default(RASCUNHO) @map("status_corrida")
+  
+  passageiroNome         String              @map("passageiro_nome") @db.VarChar(255)
+  passageiroTelefone     String              @map("passageiro_telefone") @db.VarChar(30)
+  passageiroIdentificador String?            @map("passageiro_identificador") @db.VarChar(100)
+  
+  dataHoraAgendamento    DateTime            @map("data_hora_agendamento")
+  chamadaImediata        Boolean             @default(false) @map("chamada_imediata")
+  
+  origemEnderecoCompleto String              @map("origem_endereco_completo") @db.Text
+  origemNumero           String?             @map("origem_numero") @db.VarChar(50)
+  origemComplemento      String?             @map("origem_complemento") @db.VarChar(100)
+  origemBairro           String?             @map("origem_bairro") @db.VarChar(100)
+  origemCidade           String?             @map("origem_cidade") @db.VarChar(100)
+  origemUf               String?             @map("origem_uf") @db.VarChar(2)
+  origemCep              String?             @map("origem_cep") @db.VarChar(10)
+  origemLatitude         Float?              @map("origem_latitude")
+  origemLongitude        Float?              @map("origem_longitude")
+  
+  destinoEnderecoCompleto String?            @map("destino_endereco_completo") @db.Text
+  destinoNumero          String?             @map("destino_numero") @db.VarChar(50)
+  destinoComplemento     String?             @map("destino_complemento") @db.VarChar(100)
+  destinoBairro          String?             @map("destino_bairro") @db.VarChar(100)
+  destinoCidade          String?             @map("destino_cidade") @db.VarChar(100)
+  destinoUf              String?             @map("destino_uf") @db.VarChar(2)
+  destinoCep              String?             @map("destino_cep") @db.VarChar(10)
+  destinoLatitude        Float?              @map("destino_latitude")
+  destinoLongitude       Float?              @map("destino_longitude")
+  
+  observacoes            String?             @db.Text
+  codigoOsChamado        String?             @map("codigo_os_chamado") @db.VarChar(100)
+  
+  distanciaKmEstimada    Float?              @map("distancia_km_estimada")
+  tempoMinutosEstimado   Int?                @map("tempo_minutos_estimado")
+  valorEstimadoReais     Decimal?            @map("valor_estimado_reais") @db.Decimal(10, 2)
+  valorFinalReais        Decimal?            @map("valor_final_reais") @db.Decimal(10, 2)
+  
+  classificadores        Json                @map("classificadores")
+  rawAiPayload           Json?               @map("raw_ai_payload")
+  imagemPrintUrl         String?             @map("imagem_print_url") @db.Text
+  confiancaScoreIa       Float?              @map("confianca_score_ia")
+  operadorResponsavel    String?             @map("operador_responsavel") @db.VarChar(100)
+  logsIntegracaoApi      Json?               @map("logs_integracao_api")
+  mensagemErroApi        String?             @map("mensagem_erro_api") @db.Text
+  
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+
+  contrato               Contrato            @relation(fields: [contratoId], references: [id])
+  autorizado             Autorizado?         @relation(fields: [autorizadoId], references: [id])
+
+  @@index([contratoId, dataHoraAgendamento])
+  @@index([bookingIdTaxiDigital])
+  @@map("historico_corridas")
+}
