@@ -90,15 +90,21 @@ export class AiDispatchExtractorService {
   }
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
+    let configuredModel = process.env.GEMINI_MODEL;
+    // Se o usuário tiver deixado gemini-1.5-* na Vercel, auto-atualiza para o modelo suportado
+    if (!configuredModel || configuredModel.includes('1.5') || configuredModel.includes('2.5-flash')) {
+      configuredModel = 'gemini-3.8-flash';
+    }
+
     const models = Array.from(new Set([
-      process.env.GEMINI_MODEL,
+      configuredModel,
       'gemini-3.8-flash',
       'gemini-flash-latest',
-      'gemini-2.5-flash',
       'gemini-pro-latest',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro'
+      'gemini-3.7-flash',
+      'gemini-2.5-pro'
     ].filter(Boolean))) as string[];
+
     let lastError: any = null;
 
     for (const model of models) {
