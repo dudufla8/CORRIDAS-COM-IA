@@ -91,18 +91,18 @@ export class AiDispatchExtractorService {
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
     let configuredModel = process.env.GEMINI_MODEL;
-    // Se o usuário tiver deixado gemini-1.5-* na Vercel, auto-atualiza para o modelo suportado
-    if (!configuredModel || configuredModel.includes('1.5') || configuredModel.includes('2.5-flash')) {
-      configuredModel = 'gemini-3.8-flash';
+    // Se o modelo configurado for de versão antiga ou descontinuada, prioriza gemini-3.5-flash
+    if (configuredModel && (configuredModel.includes('1.5') || configuredModel.includes('2.5-flash'))) {
+      configuredModel = undefined;
     }
 
     const models = Array.from(new Set([
       configuredModel,
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-flash-lite-latest',
       'gemini-3.8-flash',
-      'gemini-flash-latest',
-      'gemini-pro-latest',
-      'gemini-3.7-flash',
-      'gemini-2.5-pro'
+      'gemini-flash-latest'
     ].filter(Boolean))) as string[];
 
     let lastError: any = null;
@@ -146,31 +146,39 @@ export class AiDispatchExtractorService {
       generationConfig: { response_mime_type: 'application/json', temperature: 0.1 }
     };
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 18000);
 
-    const jsonResp = await response.json();
-    if (!response.ok || jsonResp.error) {
-      throw new Error(jsonResp.error?.message || `Erro da API Gemini (${model}): ${response.statusText}`);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+
+      const jsonResp = await response.json();
+      if (!response.ok || jsonResp.error) {
+        throw new Error(jsonResp.error?.message || `Erro da API Gemini (${model}): ${response.statusText}`);
+      }
+
+      const rawText = jsonResp.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        throw new Error(`O modelo ${model} não retornou nenhum texto estruturado.`);
+      }
+
+      let cleanJson = rawText.trim();
+      if (cleanJson.startsWith('```json')) {
+        cleanJson = cleanJson.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanJson.startsWith('```')) {
+        cleanJson = cleanJson.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+
+      const parsedJson = JSON.parse(cleanJson);
+      return RideExtractionSchema.parse(parsedJson);
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const rawText = jsonResp.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) {
-      throw new Error(`O modelo ${model} não retornou nenhum texto estruturado.`);
-    }
-
-    let cleanJson = rawText.trim();
-    if (cleanJson.startsWith('```json')) {
-      cleanJson = cleanJson.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-    } else if (cleanJson.startsWith('```')) {
-      cleanJson = cleanJson.replace(/^```\s*/, '').replace(/\s*```$/, '');
-    }
-
-    const parsedJson = JSON.parse(cleanJson);
-    return RideExtractionSchema.parse(parsedJson);
   }
 
   private async chamarOpenAiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {

@@ -299,17 +299,60 @@ export const AiDispatchHub: React.FC = () => {
     }
   };
 
+  // Otimização e compressão de print para envio ultra-rápido à IA (reduz de 5MB para ~150KB)
+  const otimizarPrintBase64 = (base64: string, maxDim = 1400): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width <= maxDim && height <= maxDim && base64.length < 400000) {
+          resolve(base64);
+          return;
+        }
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(base64);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.88));
+      };
+      img.onerror = () => resolve(base64);
+      img.src = base64;
+    });
+  };
+
   const processarExtracaoImagem = async (base64: string) => {
     setIsProcessingAi(true);
     setResultadoDespacho(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     try {
+      const base64Otimizado = await otimizarPrintBase64(base64);
       const response = await fetch('/api/ai/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tipo: 'IMAGEM_BASE64',
-          conteudo: base64,
+          conteudo: base64Otimizado,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -321,8 +364,13 @@ export const AiDispatchHub: React.FC = () => {
       aplicarDadosExtraidos(dados);
     } catch (err: any) {
       console.error('Erro na extração de imagem:', err);
-      alert('Aviso da IA: ' + (err.message || 'Falha ao processar o print. Verifique a chave GEMINI_API_KEY.'));
+      if (err.name === 'AbortError') {
+        alert('Tempo limite de 30s excedido ao processar print com IA. Tente novamente ou use a aba de texto.');
+      } else {
+        alert('Aviso da IA: ' + (err.message || 'Falha ao processar o print. Verifique a chave GEMINI_API_KEY.'));
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsProcessingAi(false);
     }
   };
@@ -331,6 +379,10 @@ export const AiDispatchHub: React.FC = () => {
     if (!textInput.trim()) return;
     setIsProcessingAi(true);
     setResultadoDespacho(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     try {
       const response = await fetch('/api/ai/extract', {
         method: 'POST',
@@ -339,6 +391,7 @@ export const AiDispatchHub: React.FC = () => {
           tipo: 'TEXTO_LIVRE',
           conteudo: textInput,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -350,8 +403,13 @@ export const AiDispatchHub: React.FC = () => {
       aplicarDadosExtraidos(dados);
     } catch (err: any) {
       console.error('Erro na extração de texto:', err);
-      alert('Aviso da IA: ' + (err.message || 'Falha ao processar o texto.'));
+      if (err.name === 'AbortError') {
+        alert('Tempo limite de 30s excedido ao processar texto.');
+      } else {
+        alert('Aviso da IA: ' + (err.message || 'Falha ao processar o texto.'));
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsProcessingAi(false);
     }
   };
