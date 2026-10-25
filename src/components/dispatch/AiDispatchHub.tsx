@@ -307,10 +307,14 @@ export const AiDispatchHub: React.FC = () => {
     const textoDemo = 'Agendar uma corrida amanhã às 07:30 para o Fábio Martins da Unipar saindo da Av. das Torres 2184 para a fábrica em Santo André, CC Manutenção 2026, OS #UNIPAR-M2026.';
     setTextInput(textoDemo);
     setActiveTab('TEXTO');
-    extractorRef.current.extrairSolicitacaoCorrida({
-      tipo: 'TEXTO_LIVRE',
-      conteudo: textoDemo,
-    }).then(aplicarDadosExtraidos);
+    fetch('/api/ai/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'TEXTO_LIVRE', conteudo: textoDemo }),
+    })
+      .then((res) => res.json())
+      .then(aplicarDadosExtraidos)
+      .catch((err) => console.error(err));
   };
 
   return (
@@ -486,7 +490,7 @@ export const AiDispatchHub: React.FC = () => {
                 Estimativa e Viabilidade (Táxi Digital)
               </h3>
               <button
-                onClick={calcularEstimativaRota}
+                onClick={() => calcularEstimativaRota()}
                 disabled={calculandoEstimativa}
                 className="text-xs font-semibold text-slate-500 hover:text-amber-600 flex items-center gap-1"
               >
