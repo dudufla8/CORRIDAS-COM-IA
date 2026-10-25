@@ -617,28 +617,28 @@ export const AiDispatchHub: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           {/* COLUNA ESQUERDA: INGESTÃO DE PRINT / TEXTO E ESTIMATIVA (5 colunas) */}
-          <div className="lg:col-span-5 space-y-5">
+          <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-20">
             
             {/* Card de Upload / Dropzone */}
             <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-md">
+                <div className="bg-slate-100 p-1 rounded-lg border border-slate-200/60 inline-flex items-center gap-1">
                   <button
                     onClick={() => setActiveTab('PRINT')}
-                    className={`px-3 py-1.5 rounded-sm text-xs font-medium transition-all ${
+                    className={`px-3.5 py-1.5 rounded-md text-xs transition-all ${
                       activeTab === 'PRINT'
-                        ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-white shadow-sm font-semibold text-slate-800'
+                        : 'text-slate-500 hover:text-slate-700 font-medium'
                     }`}
                   >
                     Print / Imagem
                   </button>
                   <button
                     onClick={() => setActiveTab('TEXTO')}
-                    className={`px-3 py-1.5 rounded-sm text-xs font-medium transition-all ${
+                    className={`px-3.5 py-1.5 rounded-md text-xs transition-all ${
                       activeTab === 'TEXTO'
-                        ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-white shadow-sm font-semibold text-slate-800'
+                        : 'text-slate-500 hover:text-slate-700 font-medium'
                     }`}
                   >
                     Texto Livre
@@ -783,23 +783,39 @@ export const AiDispatchHub: React.FC = () => {
 
               {estimativa ? (
                 <div className="grid grid-cols-3 gap-2.5">
-                  <div className="p-2.5 bg-slate-50 rounded-md border border-slate-200 text-center">
-                    <div className="text-[10px] uppercase font-medium text-slate-500">Distância</div>
-                    <div className="text-sm font-semibold text-slate-900 mt-0.5">{estimativa.km} km</div>
+                  <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
+                    <div className="text-[10px] uppercase font-semibold text-slate-500">Distância</div>
+                    <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.km} km</div>
                   </div>
-                  <div className="p-2.5 bg-slate-50 rounded-md border border-slate-200 text-center">
-                    <div className="text-[10px] uppercase font-medium text-slate-500">Tempo</div>
-                    <div className="text-sm font-semibold text-slate-900 mt-0.5">{estimativa.minutos} min</div>
+                  <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
+                    <div className="text-[10px] uppercase font-semibold text-slate-500">Tempo</div>
+                    <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.minutos} min</div>
                   </div>
-                  <div className="p-2.5 bg-blue-50/60 rounded-md border border-blue-200 text-center">
-                    <div className="text-[10px] uppercase font-medium text-blue-700">Valor Estimado</div>
+                  <div className="p-2.5 bg-blue-50/60 rounded-lg border border-blue-200 text-center">
+                    <div className="text-[10px] uppercase font-semibold text-blue-700">Tarifa Prevista</div>
                     <div className="text-sm font-bold text-blue-900 mt-0.5">R$ {estimativa.valor.toFixed(2)}</div>
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-slate-500 italic">
-                  Defina o embarque e o destino para obter distância e tempo.
-                </p>
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div className="p-2.5 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
+                      <div className="text-[10px] uppercase font-medium text-slate-400">Distância</div>
+                      <div className="text-sm font-semibold text-slate-400 mt-0.5">~ -- km</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
+                      <div className="text-[10px] uppercase font-medium text-slate-400">Tempo</div>
+                      <div className="text-sm font-semibold text-slate-400 mt-0.5">~ -- min</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
+                      <div className="text-[10px] uppercase font-medium text-slate-400">Tarifa Prevista</div>
+                      <div className="text-sm font-semibold text-slate-400 mt-0.5">R$ --,--</div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-400 text-center">
+                    Aguardando preenchimento de origem e destino para cálculo da rota
+                  </p>
+                </div>
               )}
             </div>
           </div>
@@ -1001,15 +1017,15 @@ export const AiDispatchHub: React.FC = () => {
               </div>
 
               {/* 7. FOOTER STICKY: BARRA DE AÇÃO FIXA */}
-              <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs py-3.5 px-5 -mx-5 -mb-5 rounded-b-xl border-t border-slate-200 z-20 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
-                <div className="text-xs text-slate-600">
+              <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs py-3.5 px-5 -mx-5 -mb-5 rounded-b-xl border-t border-slate-200 z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+                <div className="text-xs text-slate-600 flex-1 min-w-0 pr-2">
                   {!resultadoRules.podeDespachar ? (
-                    <span className="text-amber-800 font-medium flex items-center gap-1.5">
+                    <span className="text-amber-800 font-medium flex items-center gap-1.5 leading-snug">
                       <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                       Preencha os campos obrigatórios acima para liberar o envio.
                     </span>
                   ) : (
-                    <span className="text-emerald-700 font-medium flex items-center gap-1.5">
+                    <span className="text-emerald-700 font-medium flex items-center gap-1.5 leading-snug">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                       Todos os requisitos contratuais foram validados.
                     </span>
@@ -1020,7 +1036,7 @@ export const AiDispatchHub: React.FC = () => {
                   type="button"
                   disabled={!resultadoRules.podeDespachar || despachando}
                   onClick={handleDespacharCorrida}
-                  className={`h-11 px-6 rounded-md font-medium text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 ${
+                  className={`h-11 px-6 rounded-md font-medium text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 shrink-0 whitespace-nowrap ${
                     resultadoRules.podeDespachar
                       ? 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-sm cursor-pointer'
                       : 'opacity-50 cursor-not-allowed bg-slate-200 text-slate-500'
