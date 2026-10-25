@@ -142,14 +142,25 @@ export const AiDispatchHub: React.FC = () => {
     setIsProcessingAi(true);
     setResultadoDespacho(null);
     try {
-      const dados = await extractorRef.current.extrairSolicitacaoCorrida({
-        tipo: 'IMAGEM_BASE64',
-        conteudo: base64,
-        dataReferenciaIso: new Date().toISOString(),
+      const response = await fetch('/api/ai/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo: 'IMAGEM_BASE64',
+          conteudo: base64,
+        }),
       });
+
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        throw new Error(errorJson.error || `Erro HTTP ${response.status}`);
+      }
+
+      const dados: RideExtractionData = await response.json();
       aplicarDadosExtraidos(dados);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro na extração de imagem:', err);
+      alert('Aviso da IA: ' + (err.message || 'Falha ao processar o print. Verifique a chave GEMINI_API_KEY.'));
     } finally {
       setIsProcessingAi(false);
     }
@@ -160,14 +171,25 @@ export const AiDispatchHub: React.FC = () => {
     setIsProcessingAi(true);
     setResultadoDespacho(null);
     try {
-      const dados = await extractorRef.current.extrairSolicitacaoCorrida({
-        tipo: 'TEXTO_LIVRE',
-        conteudo: textInput,
-        dataReferenciaIso: new Date().toISOString(),
+      const response = await fetch('/api/ai/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo: 'TEXTO_LIVRE',
+          conteudo: textInput,
+        }),
       });
+
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        throw new Error(errorJson.error || `Erro HTTP ${response.status}`);
+      }
+
+      const dados: RideExtractionData = await response.json();
       aplicarDadosExtraidos(dados);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro na extração de texto:', err);
+      alert('Aviso da IA: ' + (err.message || 'Falha ao processar o texto.'));
     } finally {
       setIsProcessingAi(false);
     }
@@ -190,7 +212,7 @@ export const AiDispatchHub: React.FC = () => {
     setFormObservacoes(dados.observacoesOperacionais || '');
 
     consultarAutorizado(dados.passageiro.identificador || dados.passageiro.nome);
-    calcularEstimativaRota();
+    calcularEstimativaRota(dados.origem.enderecoCompleto, dados.destino?.enderecoCompleto);
   };
 
   const consultarAutorizado = async (identificador: string) => {
@@ -211,17 +233,21 @@ export const AiDispatchHub: React.FC = () => {
     }
   };
 
-  const calcularEstimativaRota = async () => {
+  const calcularEstimativaRota = async (origemCustom?: string, destinoCustom?: string) => {
+    const endOrigem = origemCustom || formOrigem;
+    const endDestino = destinoCustom || formDestino;
+    if (!endOrigem) return;
+
     setCalculandoEstimativa(true);
     try {
       const res = await taxiClientRef.current.estimateBooking({
         origem: {
-          endereco: formOrigem || 'Av. das Torres, 2184',
+          endereco: endOrigem,
           latitude: -25.501,
           longitude: -49.201,
         },
         destino: {
-          endereco: formDestino || 'Estrada de Ferro, 1000 - Santo André',
+          endereco: endDestino || 'Centro',
           latitude: -23.654,
           longitude: -46.531,
         },

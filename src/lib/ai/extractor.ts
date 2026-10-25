@@ -1,16 +1,55 @@
 import { RideExtractionSchema, RideExtractionData } from './schema';
 
 export const SYSTEM_PROMPT_DESPACHO_B2B = `
-Você é o Motor de Inteligência Artificial Operacional do Portal Táxi 2.0, especializado em recepção, parsing e despacho automatizado de corridas corporativas brasileiras via API Táxi Digital.
+Você é o Motor de Inteligência Artificial Operacional do Portal Táxi 2.0, especializado em recepção, OCR inteligente, parsing e despacho automatizado de corridas corporativas brasileiras via API Táxi Digital.
 
-Sua missão é receber capturas de tela (prints de e-mails, plataformas como Voll, Reserve, SAP Concur, chamados internos, WhatsApp corporativo), documentos ou mensagens de texto livre e extrair com precisão cirúrgica todas as entidades necessárias para o agendamento de uma corrida corporativa faturada.
+Sua missão é receber capturas de tela (prints de e-mails, chamados, plataformas como Voll, Reserve, SAP Concur, WhatsApp corporativo) ou textos livres e extrair com precisão cirúrgica todas as entidades para o agendamento da corrida.
 
-DIRETRIZES DE EXTRAÇÃO E PADRONIZAÇÃO BRASIL:
-1. RESOLUÇÃO TEMPORAL: Sempre utilize o fuso horário de Brasília (UTC-3). Resolva termos relativos ("amanhã às 07:30", "hoje às 18h") com base na data de referência.
-2. ENDEREÇOS: Separe logradouro, número, complemento, bairro, cidade e UF. Reconheça aeroportos, plantas e polos industriais.
-3. PASSAGEIRO: Nome completo, telefone/WhatsApp formatado, matrícula ou CPF.
-4. CLASSIFICADORES: OS / Chamado (ex: #UNIPAR-M2026), Centro de Custo, Projeto.
-5. SAÍDA: JSON estrito validado pelo schema informado.
+DIRETRIZES DE EXTRAÇÃO:
+1. PASSAGEIRO/VIAJANTE: Extraia o nome completo (ex: "ELIANE RAMOS MACIEL DA SILVA"), telefone com DDD (ex: "71981894584") e matrícula/identificador se presente.
+2. DATA E HORA: Sempre no fuso de Brasília (UTC-3). Converta datas como "qui, 22 de out. de 2026" para o formato ISO YYYY-MM-DD. Converta horário "08:00" para HH:MM.
+3. ORIGEM E DESTINO: Extraia o endereço completo de embarque (origem) e desembarque (destino), separando rua, número, bairro, cidade e UF quando visível.
+4. CLASSIFICADORES: Extraia o Código da OS / Agendamento (ex: "#UNIPAR-M18368822" ou similar), Centro de Custo e Projeto.
+5. SAÍDA OBRIGATÓRIA: Responda SOMENTE um JSON válido com a seguinte estrutura:
+{
+  "empresaIdentificada": "Nome da Empresa",
+  "canalOrigem": "PRINT_OCR",
+  "passageiro": {
+    "nome": "Nome completo extraído",
+    "telefone": "(XX) XXXXX-XXXX",
+    "identificador": "Matrícula/ID se houver"
+  },
+  "agendamento": {
+    "tipoAgendamento": "AGENDADO",
+    "dataAgendamento": "YYYY-MM-DD",
+    "horaAgendamento": "HH:MM",
+    "dataHoraIso": "YYYY-MM-DDTHH:MM:00-03:00"
+  },
+  "origem": {
+    "enderecoCompleto": "Endereço completo de embarque",
+    "logradouro": "Rua/Av...",
+    "numero": "...",
+    "bairro": "...",
+    "cidade": "...",
+    "uf": "UF"
+  },
+  "destino": {
+    "enderecoCompleto": "Endereço completo de desembarque",
+    "logradouro": "Rua/Av...",
+    "numero": "...",
+    "bairro": "...",
+    "cidade": "...",
+    "uf": "UF"
+  },
+  "classificadores": {
+    "codigoOsChamado": "#UNIPAR-M18368822",
+    "centroCusto": "Centro de Custo se houver",
+    "projeto": "Projeto se houver"
+  },
+  "observacoesOperacionais": "Observações da corrida",
+  "scoreConfianca": 0.98,
+  "avisosOuInconsistencias": []
+}
 `.trim();
 
 export interface ExtractionInput {
@@ -33,6 +72,7 @@ export class AiDispatchExtractorService {
     const dataRef = input.dataReferenciaIso || new Date().toISOString();
 
     if (!this.apiKey) {
+      console.warn('[AI Extractor] Nenhuma API KEY encontrada no servidor. Usando modo simulação.');
       return this.extrairModoDesenvolvimento(input, dataRef);
     }
 
@@ -43,8 +83,8 @@ export class AiDispatchExtractorService {
         return await this.chamarOpenAiMultimodal(input, dataRef);
       }
     } catch (error) {
-      console.error('[AI Extractor] Fallback de desenvolvimento ativado:', error);
-      return this.extrairModoDesenvolvimento(input, dataRef);
+      console.error('[AI Extractor] Erro na chamada à API de IA:', error);
+      throw error;
     }
   }
 
@@ -56,14 +96,17 @@ export class AiDispatchExtractorService {
     ];
 
     if (input.tipo === 'IMAGEM_BASE64') {
-      const base64Data = input.conteudo.replace(/^data:image\/[a-z]+;base64,/, '');
+      const match = input.conteudo.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
+      const mimeType = match ? match[1] : (input.mimeType || 'image/png');
+      const base64Data = input.conteudo.replace(/^data:[^;]+;base64,/, '');
+
       parts.push({
         inline_data: {
-          mime_type: input.mimeType || 'image/png',
+          mime_type: mimeType,
           data: base64Data,
         }
       });
-      parts.push({ text: 'Extraia os dados deste print corporativo no formato JSON estrito conforme o schema especificado.' });
+      parts.push({ text: 'Extraia com máxima fidelidade todos os dados visíveis nesta imagem de chamado corporativo no formato JSON estrito.' });
     } else {
       parts.push({ text: `Texto da solicitação corporativa a ser parseado:\n"""\n${input.conteudo}\n"""` });
     }
@@ -80,7 +123,15 @@ export class AiDispatchExtractorService {
     });
 
     const jsonResp = await response.json();
+    if (!response.ok || jsonResp.error) {
+      throw new Error(jsonResp.error?.message || `Erro da API Gemini: ${response.statusText}`);
+    }
+
     const rawText = jsonResp.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) {
+      throw new Error('A IA não retornou nenhum texto estruturado.');
+    }
+
     const parsedJson = JSON.parse(rawText);
     return RideExtractionSchema.parse(parsedJson);
   }
