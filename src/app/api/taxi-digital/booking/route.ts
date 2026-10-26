@@ -67,6 +67,7 @@ export async function POST(req: NextRequest) {
       destino,
       classificadores = {},
       observacoes = '',
+      categoryId: categoryIdFromBody,
     } = body;
 
     const baseUrl = process.env.TAXI_DIGITAL_BASE_URL || 'https://api.taxidigital.net/APITD';
@@ -93,33 +94,35 @@ export async function POST(req: NextRequest) {
     const horaFormatada = hora || '08:00';
     const dataHoraRef = `${dataFormatada} ${horaFormatada}:00`;
 
-    // 3. Obter Categoria de Táxi para a região
-    let categoryId: number | undefined;
-    try {
-      const catRes = await fetch(`${baseUrl}/api/booking/categories/json`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Versao': '3',
-          Authorization: authHeader,
-          'X-uiCliente': contratoConfig.uiCliente,
-        },
-        body: JSON.stringify({
-          init_lat: coordsOrigem.lat,
-          init_lng: coordsOrigem.lng,
-          reference_date: dataHoraRef,
-        }),
-      });
+    // 3. Obter Categoria de Táxi para a região (ou utilizar a selecionada pelo operador)
+    let categoryId: number | undefined = categoryIdFromBody ? Number(categoryIdFromBody) : undefined;
+    if (!categoryId) {
+      try {
+        const catRes = await fetch(`${baseUrl}/api/booking/categories/json`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Versao': '3',
+            Authorization: authHeader,
+            'X-uiCliente': contratoConfig.uiCliente,
+          },
+          body: JSON.stringify({
+            init_lat: coordsOrigem.lat,
+            init_lng: coordsOrigem.lng,
+            reference_date: dataHoraRef,
+          }),
+        });
 
-      if (catRes.ok) {
-        const catData = await catRes.json();
-        const cats = catData.data?.categories || [];
-        if (cats.length > 0) {
-          categoryId = Number(cats[0].category_id);
+        if (catRes.ok) {
+          const catData = await catRes.json();
+          const cats = catData.data?.categories || [];
+          if (cats.length > 0) {
+            categoryId = Number(cats[0].category_id);
+          }
         }
+      } catch (catErr) {
+        console.warn('[Táxi Digital] Erro ao buscar categoria:', catErr);
       }
-    } catch (catErr) {
-      console.warn('[Táxi Digital] Erro ao buscar categoria:', catErr);
     }
 
     if (!categoryId) {

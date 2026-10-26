@@ -26,6 +26,16 @@ import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } fro
 import { TaxiDigitalApiClient } from '../../lib/taxi-digital/client';
 import { ClassificationRuleValidator } from './ClassificationRuleValidator';
 
+export interface CategoriaTaxiDigital {
+  id: string;
+  nome: string;
+  valor: number;
+  distanciaKm: number;
+  tempoMinutos: number;
+  precoFixo: boolean;
+  capacidade?: number;
+}
+
 export interface ContratoCorporativo {
   id: string;
   nomeExibicao: string;
@@ -245,6 +255,8 @@ export const AiDispatchHub: React.FC = () => {
   const [verificandoAutorizado, setVerificandoAutorizado] = useState(false);
 
   const [estimativa, setEstimativa] = useState<{ km: number; minutos: number; valor: number } | null>(null);
+  const [categoriasDisponiveis, setCategoriasDisponiveis] = useState<CategoriaTaxiDigital[]>([]);
+  const [categoriaSelecionadaId, setCategoriaSelecionadaId] = useState<string>('');
   const [calculandoEstimativa, setCalculandoEstimativa] = useState(false);
   const [despachando, setDespachando] = useState(false);
   const [resultadoDespacho, setResultadoDespacho] = useState<{ bookingId: string; voucher: string; status: string } | null>(null);
@@ -445,7 +457,13 @@ export const AiDispatchHub: React.FC = () => {
     }
 
     consultarAutorizado(dados.passageiro.identificador || dados.passageiro.nome);
-    calcularEstimativaRota(dados.origem.enderecoCompleto, dados.destino?.enderecoCompleto);
+    calcularEstimativaRota(
+      dados.origem.enderecoCompleto,
+      dados.destino?.enderecoCompleto,
+      contratoDetectado?.id,
+      dados.agendamento.dataAgendamento,
+      dados.agendamento.horaAgendamento
+    );
   };
 
   const consultarAutorizado = async (identificador: string) => {
@@ -466,37 +484,71 @@ export const AiDispatchHub: React.FC = () => {
     }
   };
 
-  const calcularEstimativaRota = async (origemCustom?: string, destinoCustom?: string) => {
+  const calcularEstimativaRota = async (
+    origemCustom?: string,
+    destinoCustom?: string,
+    contratoIdCustom?: string,
+    dataCustom?: string,
+    horaCustom?: string
+  ) => {
     const endOrigem = origemCustom || formOrigem;
     const endDestino = destinoCustom || formDestino;
+    const cid = contratoIdCustom || contratoSelecionadoId;
+    const dt = dataCustom || formViagem.data;
+    const hr = horaCustom || formViagem.hora;
+
     if (!endOrigem) return;
 
     setCalculandoEstimativa(true);
     try {
-      const res = await taxiClientRef.current.estimateBooking({
-        origem: {
-          endereco: endOrigem,
-          latitude: -25.501,
-          longitude: -49.201,
-        },
-        destino: {
-          endereco: endDestino || 'Centro',
-          latitude: -23.654,
-          longitude: -46.531,
-        },
+      const res = await fetch('/api/taxi-digital/estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contratoId: cid,
+          origem: endOrigem,
+          destino: endDestino,
+          data: dt,
+          hora: hr,
+        }),
       });
-      if (res.status) {
+
+      const resJson = await res.json().catch(() => ({}));
+      if (resJson.status && resJson.categories && resJson.categories.length > 0) {
+        setCategoriasDisponiveis(resJson.categories);
+
+        // Se a categoria selecionada anteriormente ainda existir na lista retornada, mantém
+        const catExistente = resJson.categories.find((c: any) => c.id === categoriaSelecionadaId);
+        const catEscolhida = catExistente || resJson.categories[0];
+        setCategoriaSelecionadaId(catEscolhida.id);
+
         setEstimativa({
-          km: res.distancia_km,
-          minutos: res.tempo_estimado_minutos,
-          valor: res.valor_estimado,
+          km: catEscolhida.distanciaKm,
+          minutos: catEscolhida.tempoMinutos,
+          valor: catEscolhida.valor,
+        });
+      } else if (resJson.valorEstimado) {
+        setCategoriasDisponiveis([]);
+        setEstimativa({
+          km: resJson.distanciaKm || 0,
+          minutos: resJson.tempoMinutos || 35,
+          valor: resJson.valorEstimado || 0,
         });
       }
     } catch (err) {
-      console.error('Erro ao calcular estimativa:', err);
+      console.error('Erro ao calcular estimativa e buscar categorias:', err);
     } finally {
       setCalculandoEstimativa(false);
     }
+  };
+
+  const handleSelecionarCategoria = (cat: CategoriaTaxiDigital) => {
+    setCategoriaSelecionadaId(cat.id);
+    setEstimativa({
+      km: cat.distanciaKm,
+      minutos: cat.tempoMinutos,
+      valor: cat.valor,
+    });
   };
 
   const handleDespacharCorrida = async () => {
@@ -512,6 +564,7 @@ export const AiDispatchHub: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contratoId: contratoSelecionadoId,
+          categoryId: categoriaSelecionadaId,
           passageiroNome: formPassageiro.nome,
           passageiroTelefone: formPassageiro.telefone,
           tipo: formViagem.tipo,
@@ -782,19 +835,76 @@ export const AiDispatchHub: React.FC = () => {
               </div>
 
               {estimativa ? (
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
-                    <div className="text-[10px] uppercase font-semibold text-slate-500">Distância</div>
-                    <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.km} km</div>
+                <div className="space-y-3.5">
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
+                      <div className="text-[10px] uppercase font-semibold text-slate-500">Distância</div>
+                      <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.km} km</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
+                      <div className="text-[10px] uppercase font-semibold text-slate-500">Tempo</div>
+                      <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.minutos} min</div>
+                    </div>
+                    <div className="p-2.5 bg-blue-50/60 rounded-lg border border-blue-200 text-center">
+                      <div className="text-[10px] uppercase font-semibold text-blue-700">Tarifa Prevista</div>
+                      <div className="text-sm font-bold text-blue-900 mt-0.5">R$ {estimativa.valor.toFixed(2)}</div>
+                    </div>
                   </div>
-                  <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
-                    <div className="text-[10px] uppercase font-semibold text-slate-500">Tempo</div>
-                    <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.minutos} min</div>
-                  </div>
-                  <div className="p-2.5 bg-blue-50/60 rounded-lg border border-blue-200 text-center">
-                    <div className="text-[10px] uppercase font-semibold text-blue-700">Tarifa Prevista</div>
-                    <div className="text-sm font-bold text-blue-900 mt-0.5">R$ {estimativa.valor.toFixed(2)}</div>
-                  </div>
+
+                  {/* LISTA DE CATEGORIAS DA TÁXI DIGITAL */}
+                  {categoriasDisponiveis.length > 0 && (
+                    <div className="pt-3 border-t border-slate-100 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                          <Car className="w-3.5 h-3.5 text-blue-600" />
+                          Categoria do Táxi
+                        </span>
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          {categoriasDisponiveis.length} {categoriasDisponiveis.length === 1 ? 'categoria ativa' : 'categorias ativas'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {categoriasDisponiveis.map((cat) => {
+                          const isSelected = cat.id === categoriaSelecionadaId;
+                          return (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              onClick={() => handleSelecionarCategoria(cat)}
+                              className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-center justify-between cursor-pointer ${
+                                isSelected
+                                  ? 'border-blue-600 bg-blue-50/70 shadow-2xs ring-1 ring-blue-600'
+                                  : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="space-y-0.5 min-w-0 pr-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`text-xs font-semibold truncate ${isSelected ? 'text-blue-900 font-bold' : 'text-slate-800'}`}>
+                                    {cat.nome}
+                                  </span>
+                                  {isSelected && (
+                                    <span className="text-[9px] font-semibold text-blue-700 bg-blue-100/90 px-1.5 py-0.2 rounded">
+                                      Selecionada
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-500">
+                                  {cat.precoFixo ? 'Preço Tabelado Fechado' : 'Taxímetro Estimado'} • Cód. {cat.id}
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0">
+                                <div className={`text-sm font-bold ${isSelected ? 'text-blue-900' : 'text-slate-900'}`}>
+                                  R$ {cat.valor.toFixed(2)}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -813,7 +923,7 @@ export const AiDispatchHub: React.FC = () => {
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400 text-center">
-                    Aguardando preenchimento de origem e destino para cálculo da rota
+                    Aguardando preenchimento de origem e destino para consultar categorias e valor oficial
                   </p>
                 </div>
               )}
@@ -864,8 +974,10 @@ export const AiDispatchHub: React.FC = () => {
                 <select
                   value={contratoSelecionadoId}
                   onChange={(e) => {
-                    setContratoSelecionadoId(e.target.value);
+                    const novoId = e.target.value;
+                    setContratoSelecionadoId(novoId);
                     setContratoAutoDetectado(false);
+                    calcularEstimativaRota(undefined, undefined, novoId);
                   }}
                   className="w-full h-10 px-3 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none shadow-2xs cursor-pointer"
                 >
