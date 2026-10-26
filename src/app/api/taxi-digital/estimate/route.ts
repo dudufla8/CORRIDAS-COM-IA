@@ -70,6 +70,8 @@ export async function POST(req: NextRequest) {
     if (data && data.includes('-')) {
       const [yyyy, mm, dd] = data.split('-');
       dataFormatada = `${dd}/${mm}/${yyyy}`;
+    } else if (data && data.includes('/')) {
+      dataFormatada = data;
     } else {
       const hoje = new Date();
       dataFormatada = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;

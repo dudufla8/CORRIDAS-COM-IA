@@ -240,7 +240,7 @@ export const AiDispatchHub: React.FC = () => {
   const [isProcessingAi, setIsProcessingAi] = useState(false);
 
   // CONTRATOS DINÂMICOS
-  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('unipar-voll');
+  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('claro-voll');
   const [contratoAutoDetectado, setContratoAutoDetectado] = useState(false);
 
   const [extractedData, setExtractedData] = useState<RideExtractionData | null>(null);
@@ -258,6 +258,7 @@ export const AiDispatchHub: React.FC = () => {
   const [categoriasDisponiveis, setCategoriasDisponiveis] = useState<CategoriaTaxiDigital[]>([]);
   const [categoriaSelecionadaId, setCategoriaSelecionadaId] = useState<string>('');
   const [calculandoEstimativa, setCalculandoEstimativa] = useState(false);
+  const [erroEstimativa, setErroEstimativa] = useState<string | null>(null);
   const [despachando, setDespachando] = useState(false);
   const [resultadoDespacho, setResultadoDespacho] = useState<{ bookingId: string; voucher: string; status: string } | null>(null);
 
@@ -500,6 +501,7 @@ export const AiDispatchHub: React.FC = () => {
     if (!endOrigem) return;
 
     setCalculandoEstimativa(true);
+    setErroEstimativa(null);
     try {
       const res = await fetch('/api/taxi-digital/estimate', {
         method: 'POST',
@@ -527,6 +529,10 @@ export const AiDispatchHub: React.FC = () => {
           minutos: catEscolhida.tempoMinutos,
           valor: catEscolhida.valor,
         });
+      } else if (resJson.status && resJson.totalCategorias === 0) {
+        setCategoriasDisponiveis([]);
+        setEstimativa(null);
+        setErroEstimativa(`Nenhuma categoria da Táxi Digital encontrada para este contrato nesta região.`);
       } else if (resJson.valorEstimado) {
         setCategoriasDisponiveis([]);
         setEstimativa({
@@ -534,9 +540,13 @@ export const AiDispatchHub: React.FC = () => {
           minutos: resJson.tempoMinutos || 35,
           valor: resJson.valorEstimado || 0,
         });
+      } else {
+        setCategoriasDisponiveis([]);
+        setEstimativa(null);
       }
     } catch (err) {
       console.error('Erro ao calcular estimativa e buscar categorias:', err);
+      setErroEstimativa('Não foi possível obter a estimativa da Táxi Digital.');
     } finally {
       setCalculandoEstimativa(false);
     }
@@ -922,9 +932,20 @@ export const AiDispatchHub: React.FC = () => {
                       <div className="text-sm font-semibold text-slate-400 mt-0.5">R$ --,--</div>
                     </div>
                   </div>
-                  <p className="text-[11px] text-slate-400 text-center">
-                    Aguardando preenchimento de origem e destino para consultar categorias e valor oficial
-                  </p>
+
+                  {erroEstimativa ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-semibold text-amber-950">Aviso da Táxi Digital</div>
+                        <div className="text-[11px] text-amber-800 mt-0.5">{erroEstimativa}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 text-center">
+                      Aguardando preenchimento de origem e destino para consultar categorias e valor oficial
+                    </p>
+                  )}
                 </div>
               )}
             </div>
