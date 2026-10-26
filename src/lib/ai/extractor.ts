@@ -129,11 +129,19 @@ export class AiDispatchExtractorService {
 
     // Detecção da empresa com base no código e contexto
     const textoDetect = `${codigoOs} ${centroCusto} ${dados.empresaIdentificada || ''} ${dados.observacoesOperacionais || ''}`.toUpperCase();
+    const hasVollCode = /#?UNIPAR-M/i.test(codigoOs) || /#UNIPAR-M/i.test(textoDetect);
+
     if (textoDetect.includes('CLARO')) {
       dados.empresaIdentificada = 'CLARO VOLL';
-    } else if (codigoOs.toUpperCase().includes('UNIPAR-M') || (textoDetect.includes('UNIPAR') && textoDetect.includes('VOLL'))) {
+    } else if (hasVollCode) {
       dados.empresaIdentificada = 'UNIPAR VOLL';
-    } else if (textoDetect.includes('UNIPAR') || textoDetect.includes('CARBOCLORO') || textoDetect.includes('10300020') || textoDetect.includes('SOLANGE')) {
+    } else if (
+      textoDetect.includes('10300020') ||
+      textoDetect.includes('CARBOCLORO') ||
+      textoDetect.includes('UNIPAR DIRETO') ||
+      textoDetect.includes('SOLANGE') ||
+      textoDetect.includes('UNIPAR')
+    ) {
       dados.empresaIdentificada = 'UNIPAR DIRETO';
     }
 

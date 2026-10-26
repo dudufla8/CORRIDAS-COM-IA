@@ -148,9 +148,9 @@ export async function POST(req: NextRequest) {
     // Reanálise de categorias: NUNCA usar categoria fixa, pois sempre depende da origem da corrida!
     let categoryId: number | undefined = categoryIdFromBody ? Number(categoryIdFromBody) : undefined;
     if (!categoryId) {
+      // 1. Consultar /api/booking/categories/json para obter a categoria regional da origem
       try {
-        // Tentar buscar categorias via /estimate com origem e destino reais
-        const estRes = await fetch(`${baseUrl}/api/booking/estimate/json`, {
+        const catRes = await fetch(`${baseUrl}/api/booking/categories/json`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -161,27 +161,25 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             init_lat: coordsOrigem.lat,
             init_lng: coordsOrigem.lng,
-            end_lat: coordsDestino?.lat,
-            end_lng: coordsDestino?.lng,
             reference_date: dataHoraRef,
           }),
         });
 
-        if (estRes.ok) {
-          const estData = await estRes.json();
-          const cats = estData.data?.categories || [];
+        if (catRes.ok) {
+          const catData = await catRes.json();
+          const cats = catData.data?.categories || [];
           if (cats.length > 0) {
             categoryId = Number(cats[0].category_id);
           }
         }
-      } catch (estErr) {
-        console.warn('[Táxi Digital] Erro ao estimar categoria por rota:', estErr);
+      } catch (catErr) {
+        console.warn('[Táxi Digital] Erro ao buscar categoria regional via /categories:', catErr);
       }
 
-      // Se não retornou em estimate, tentar /categories
-      if (!categoryId) {
+      // 2. Se não retornou em /categories (comum em contratos de traslado/intermunicipal como UNIPAR DIRETO que exigem destino), consultar /estimate
+      if (!categoryId && coordsDestino) {
         try {
-          const catRes = await fetch(`${baseUrl}/api/booking/categories/json`, {
+          const estRes = await fetch(`${baseUrl}/api/booking/estimate/json`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -192,19 +190,21 @@ export async function POST(req: NextRequest) {
             body: JSON.stringify({
               init_lat: coordsOrigem.lat,
               init_lng: coordsOrigem.lng,
+              end_lat: coordsDestino.lat,
+              end_lng: coordsDestino.lng,
               reference_date: dataHoraRef,
             }),
           });
 
-          if (catRes.ok) {
-            const catData = await catRes.json();
-            const cats = catData.data?.categories || [];
+          if (estRes.ok) {
+            const estData = await estRes.json();
+            const cats = estData.data?.categories || [];
             if (cats.length > 0) {
               categoryId = Number(cats[0].category_id);
             }
           }
-        } catch (catErr) {
-          console.warn('[Táxi Digital] Erro ao buscar categoria regional:', catErr);
+        } catch (estErr) {
+          console.warn('[Táxi Digital] Erro ao estimar categoria por rota:', estErr);
         }
       }
     }

@@ -142,35 +142,12 @@ export async function POST(req: NextRequest) {
     const horaFormatada = hora || '08:00';
     const referenceDate = `${dataFormatada} ${horaFormatada}:00`;
 
-    // 3. Montar payload para /api/booking/estimate/json
-    const estimatePayload: any = {
-      init_lat: coordsOrigem.lat,
-      init_lng: coordsOrigem.lng,
-      reference_date: referenceDate,
-    };
+    // 3. Chamada Oficial da API Táxi Digital: /api/booking/categories/json
+    // O usuário especificou o uso explícito de /api/booking/categories/json para listar as categorias da origem
+    let rawCategories: any[] = [];
+    let estCategories: any[] = [];
 
-    if (coordsDestino) {
-      estimatePayload.end_lat = coordsDestino.lat;
-      estimatePayload.end_lng = coordsDestino.lng;
-    }
-
-    // 4. Chamar endpoint oficial da Táxi Digital
-    const res = await fetch(`${baseUrl}/api/booking/estimate/json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Versao': '3',
-        Authorization: authHeader,
-        'X-uiCliente': contratoConfig.uiCliente,
-      },
-      body: JSON.stringify(estimatePayload),
-    });
-
-    const resJson = await res.json().catch(() => ({}));
-    let rawCategories: any[] = resJson.data?.categories || [];
-
-    // Fallback caso /estimate retorne vazio e haja categorias em /categories
-    if (rawCategories.length === 0) {
+    try {
       const resCat = await fetch(`${baseUrl}/api/booking/categories/json`, {
         method: 'POST',
         headers: {
@@ -185,11 +162,60 @@ export async function POST(req: NextRequest) {
           reference_date: referenceDate,
         }),
       });
-      const catJson = await resCat.json().catch(() => ({}));
-      rawCategories = catJson.data?.categories || [];
+
+      if (resCat.ok) {
+        const catJson = await resCat.json();
+        rawCategories = catJson.data?.categories || [];
+      }
+    } catch (catErr) {
+      console.warn('[Táxi Digital] Erro ao chamar /api/booking/categories/json:', catErr);
     }
 
-    const categories = rawCategories.map((cat: any) => {
+    // 4. Se houver destino, chamar /api/booking/estimate/json para calcular tarifa, distância e tempo da rota
+    if (coordsDestino) {
+      try {
+        const estimatePayload: any = {
+          init_lat: coordsOrigem.lat,
+          init_lng: coordsOrigem.lng,
+          end_lat: coordsDestino.lat,
+          end_lng: coordsDestino.lng,
+          reference_date: referenceDate,
+        };
+
+        const resEst = await fetch(`${baseUrl}/api/booking/estimate/json`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Versao': '3',
+            Authorization: authHeader,
+            'X-uiCliente': contratoConfig.uiCliente,
+          },
+          body: JSON.stringify(estimatePayload),
+        });
+
+        if (resEst.ok) {
+          const resJson = await resEst.json();
+          estCategories = resJson.data?.categories || [];
+        }
+      } catch (estErr) {
+        console.warn('[Táxi Digital] Erro ao chamar /api/booking/estimate/json:', estErr);
+      }
+    }
+
+    // 5. Reconciliar categorias:
+    // Se /api/booking/categories/json retornou categorias, enriquece com a estimativa de rota
+    // Se /categories retornou 0 (comum em contratos de traslado fechado como UNIPAR DIRETO que exigem destino), usa as de /estimate
+    let finalCategoriesList: any[] = [];
+    if (rawCategories.length > 0) {
+      finalCategoriesList = rawCategories.map((rc: any) => {
+        const matchingEst = estCategories.find((ec: any) => String(ec.category_id) === String(rc.category_id));
+        return matchingEst || rc;
+      });
+    } else if (estCategories.length > 0) {
+      finalCategoriesList = estCategories;
+    }
+
+    const categories = finalCategoriesList.map((cat: any) => {
       let valorNum = 0;
       if (typeof cat.estimate === 'number') {
         valorNum = cat.estimate;

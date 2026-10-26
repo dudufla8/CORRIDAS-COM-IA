@@ -294,9 +294,11 @@ export const AiDispatchHub: React.FC = () => {
   const [textInput, setTextInput] = useState('');
   const [isProcessingAi, setIsProcessingAi] = useState(false);
 
-  // CONTRATOS DINÂMICOS
-  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('claro-voll');
+  // CONTRATOS DINÂMICOS & CONTROLE MANUAL
+  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('unipar-direto');
   const [contratoAutoDetectado, setContratoAutoDetectado] = useState(false);
+  const [contratoModoManual, setContratoModoManual] = useState(false);
+  const contratoModoManualRef = useRef(false);
 
   const [extractedData, setExtractedData] = useState<RideExtractionData | null>(null);
   const [formPassageiro, setFormPassageiro] = useState({ nome: '', telefone: '', identificador: '' });
@@ -565,63 +567,46 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     setFormDestino(dados.destino?.enderecoCompleto || '');
     setFormObservacoes(dados.observacoesOperacionais || '');
 
-    // Auto-detecção inteligente do contrato da empresa
-    const textoBusca = `${dados.empresaIdentificada || ''} ${dados.classificadores?.codigoOsChamado || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''} ${dados.observacoesOperacionais || ''} ${dados.classificadores?.centroCusto || ''}`.toLowerCase();
+    // Auto-detecção inteligente do contrato da empresa (APENAS se o operador não tiver definido manualmente)
+    let contratoFinalId = contratoSelecionadoId;
 
-    let contratoDetectado: ContratoCorporativo | undefined;
-    if (/#unipar-m/i.test(textoBusca) || (textoBusca.includes('unipar') && textoBusca.includes('voll'))) {
-      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'unipar-voll');
-    } else if (textoBusca.includes('unipar') || textoBusca.includes('carbocloro') || textoBusca.includes('10300020') || textoBusca.includes('solange')) {
-      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'unipar-direto');
-    } else if (/#claro/i.test(textoBusca) || textoBusca.includes('claro') || textoBusca.includes('embratel')) {
-      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'claro-voll');
-    } else if (/#itau/i.test(textoBusca) || textoBusca.includes('itau') || textoBusca.includes('itaú') || textoBusca.includes('voll')) {
-      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'voll-geral');
+    if (!contratoModoManualRef.current) {
+      const textoBusca = `${dados.empresaIdentificada || ''} ${dados.classificadores?.codigoOsChamado || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''} ${dados.observacoesOperacionais || ''} ${dados.classificadores?.centroCusto || ''}`.toLowerCase();
+      const hasVollCode = /#?unipar-m/i.test(textoBusca);
+
+      let contratoDetectado: ContratoCorporativo | undefined;
+      if (hasVollCode) {
+        contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'unipar-voll');
+      } else if (
+        textoBusca.includes('10300020') ||
+        textoBusca.includes('carbocloro') ||
+        textoBusca.includes('unipar direto') ||
+        textoBusca.includes('@unipar.com') ||
+        textoBusca.includes('solange') ||
+        textoBusca.includes('unipar')
+      ) {
+        contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'unipar-direto');
+      } else if (/#claro/i.test(textoBusca) || textoBusca.includes('claro') || textoBusca.includes('embratel')) {
+        contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'claro-voll');
+      } else if (/#itau/i.test(textoBusca) || textoBusca.includes('itau') || textoBusca.includes('itaú') || textoBusca.includes('voll')) {
+        contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'voll-geral');
+      } else {
+        contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) =>
+          c.palavrasChave.some((kw) => textoBusca.includes(kw.toLowerCase()))
+        );
+      }
+
+      if (contratoDetectado) {
+        contratoFinalId = contratoDetectado.id;
+        setContratoSelecionadoId(contratoDetectado.id);
+        setContratoAutoDetectado(true);
+      }
     } else {
-      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) =>
-        c.palavrasChave.some((kw) => textoBusca.includes(kw.toLowerCase()))
-      );
+      console.log('[AiDispatchHub] Mantendo contrato fixado manualmente pelo operador:', contratoSelecionadoId);
     }
 
-    const contratoFinalId = contratoDetectado ? contratoDetectado.id : contratoSelecionadoId;
-    if (contratoDetectado) {
-      setContratoSelecionadoId(contratoDetectado.id);
-      setContratoAutoDetectado(true);
-    }
-
-    // Pré-preenchimento automático dos classificadores e campo NOME
-    const novosValores: Record<string, string> = {};
-    if (dados.passageiro?.nome) {
-      novosValores['nomeSolicitante'] = dados.passageiro.nome;
-    }
-
-    if (contratoFinalId === 'unipar-direto') {
-      novosValores['classificador1'] = 'UNIPAR CARBOCLORO';
-      novosValores['classificador2'] = dados.classificadores?.centroCusto || '10300020';
-      if (dados.classificadores?.solicitante) {
-        novosValores['classificador5'] = dados.classificadores.solicitante;
-      }
-      if (dados.observacoesOperacionais) {
-        novosValores['classificador6'] = dados.observacoesOperacionais;
-      }
-    } else if (contratoFinalId === 'claro-voll') {
-      if (dados.classificadores?.codigoOsChamado) {
-        novosValores['classificador1'] = dados.classificadores.codigoOsChamado;
-      }
-      novosValores['classificador2'] = 'TÁXI 2.0';
-    } else {
-      if (dados.classificadores?.codigoOsChamado) {
-        novosValores['classificador1'] = dados.classificadores.codigoOsChamado;
-      }
-      if (dados.classificadores?.centroCusto) {
-        novosValores['classificador2'] = dados.classificadores.centroCusto;
-      }
-      if (/itau|itaú/i.test(textoBusca)) {
-        novosValores['classificador2'] = 'ITAU';
-        novosValores['classificador3'] = 'itau-0002';
-      }
-    }
-    setValoresManuais((prev) => ({ ...prev, ...novosValores }));
+    // Pré-preenchimento automático dos classificadores adaptado ao contrato
+    adaptarClassificadoresParaContrato(contratoFinalId, dados, dados.passageiro?.nome);
 
     consultarAutorizado(dados.passageiro.identificador || dados.passageiro.nome);
     calcularEstimativaRota(
@@ -631,6 +616,55 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       dados.agendamento.dataAgendamento,
       dados.agendamento.horaAgendamento
     );
+  };
+
+  const adaptarClassificadoresParaContrato = (
+    contratoId: string,
+    dadosAtuais?: RideExtractionData | null,
+    passageiroNome?: string
+  ) => {
+    const dados = dadosAtuais !== undefined ? dadosAtuais : extractedData;
+    const nome = passageiroNome || formPassageiro.nome;
+    const novos: Record<string, string> = {};
+
+    if (nome) {
+      novos['nomeSolicitante'] = nome;
+    }
+
+    if (contratoId === 'unipar-direto') {
+      novos['classificador1'] = 'UNIPAR CARBOCLORO';
+      novos['classificador2'] = dados?.classificadores?.centroCusto || '10300020';
+      if (dados?.classificadores?.solicitante) {
+        novos['classificador5'] = dados.classificadores.solicitante;
+      }
+      if (dados?.observacoesOperacionais) {
+        novos['classificador6'] = dados.observacoesOperacionais;
+      }
+    } else if (contratoId === 'unipar-voll') {
+      if (dados?.classificadores?.codigoOsChamado) {
+        novos['classificador1'] = dados.classificadores.codigoOsChamado;
+      }
+      if (formPassageiro.telefone) {
+        novos['classificador2'] = formPassageiro.telefone;
+      }
+      if (dados?.classificadores?.centroCusto) {
+        novos['classificador3'] = dados.classificadores.centroCusto;
+      }
+    } else if (contratoId === 'claro-voll') {
+      if (dados?.classificadores?.codigoOsChamado) {
+        novos['classificador1'] = dados.classificadores.codigoOsChamado;
+      }
+      novos['classificador2'] = 'TÁXI 2.0';
+    } else {
+      if (dados?.classificadores?.codigoOsChamado) {
+        novos['classificador1'] = dados.classificadores.codigoOsChamado;
+      }
+      if (dados?.classificadores?.centroCusto) {
+        novos['classificador2'] = dados.classificadores.centroCusto;
+      }
+    }
+
+    setValoresManuais((prev) => ({ ...prev, ...novos }));
   };
 
   const consultarAutorizado = async (identificador: string) => {
@@ -1312,22 +1346,42 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                 )}
               </div>
 
-              {/* SELETOR DE CONTRATO B2B SÓBRIO */}
+              {/* SELETOR DE CONTRATO B2B SÓBRIO COM CONTROLE MANUAL/AUTO */}
               <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
                     <Building2 className="w-3.5 h-3.5 text-slate-600" />
                     Contrato Corporativo
                   </label>
-                  {contratoAutoDetectado ? (
-                    <span className="text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
-                      Identificado pela IA
-                    </span>
-                  ) : (
-                    <span className="bg-slate-100 text-slate-600 font-mono text-xs px-2 py-0.5 rounded border border-slate-200/60">
-                      {contratoAtual.uiCliente}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {contratoModoManual ? (
+                      <span className="text-[10px] font-semibold text-slate-800 bg-slate-200/90 border border-slate-300 px-2 py-0.5 rounded flex items-center gap-1 shadow-2xs">
+                        Manual (Fixado por Você)
+                      </span>
+                    ) : contratoAutoDetectado ? (
+                      <span className="text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
+                        Identificado pela IA
+                      </span>
+                    ) : (
+                      <span className="bg-slate-100 text-slate-600 font-mono text-xs px-2 py-0.5 rounded border border-slate-200/60">
+                        {contratoAtual.uiCliente}
+                      </span>
+                    )}
+
+                    {contratoModoManual && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setContratoModoManual(false);
+                          contratoModoManualRef.current = false;
+                        }}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 underline font-medium cursor-pointer"
+                        title="Permitir que a IA altere o contrato na próxima extração"
+                      >
+                        Ativar Auto IA
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <select
@@ -1335,7 +1389,10 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                   onChange={(e) => {
                     const novoId = e.target.value;
                     setContratoSelecionadoId(novoId);
+                    setContratoModoManual(true);
+                    contratoModoManualRef.current = true;
                     setContratoAutoDetectado(false);
+                    adaptarClassificadoresParaContrato(novoId);
                     calcularEstimativaRota(undefined, undefined, novoId);
                   }}
                   className="w-full h-10 px-3 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none shadow-2xs cursor-pointer"
