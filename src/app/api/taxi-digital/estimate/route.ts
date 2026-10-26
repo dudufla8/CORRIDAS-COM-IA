@@ -24,22 +24,63 @@ const MAPA_CONTRATOS: Record<string, ContratoConfig> = {
   },
 };
 
-async function geocodificarEndereco(endereco: string, fallbackLat = -22.824, fallbackLng = -43.003) {
-  try {
-    const limpo = endereco.replace(/[—–-]/g, ' ').replace(/\s+/g, ' ').trim();
-    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(limpo)}&limit=1`;
-    const res = await fetch(url, { headers: { 'User-Agent': 'Taxi20-B2B/1.0' } });
-    if (res.ok) {
-      const data = await res.json();
-      const coords = data.features?.[0]?.geometry?.coordinates;
-      if (coords && coords.length >= 2) {
-        return { lat: coords[1], lng: coords[0] };
-      }
+async function geocodificarEndereco(endereco: string) {
+  if (!endereco) return null;
+  const tentativas: string[] = [];
+
+  // 1. Endereço completo com espaços limpos
+  const limpo = endereco.replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  tentativas.push(limpo);
+
+  // 2. Se tiver hífens (ex: 'Banco Itaú - Agência 0253 - Avenida...'), testar progressivamente sem prefixos comerciais
+  const partes = limpo.split('-').map((p) => p.trim()).filter(Boolean);
+  if (partes.length > 1) {
+    for (let i = 1; i < partes.length; i++) {
+      tentativas.push(partes.slice(i).join(', '));
     }
-  } catch (e) {
-    console.warn('[Geocoding] Falha ao obter coordenadas via Photon:', e);
   }
-  return { lat: fallbackLat, lng: fallbackLng };
+
+  // 3. Testar logradouro + cidade + UF
+  const matchCidadeUf = limpo.match(/([A-Za-zÀ-ÿ\s]+)\s*[-,\/]\s*([A-Za-z]{2})/);
+  if (matchCidadeUf) {
+    const cidadeUf = matchCidadeUf[0];
+    const logradouro = partes.find((p) =>
+      /^(rua|r\.|av|avenida|alameda|al\.|travessa|rodovia|estrada|praça|pça)/i.test(p)
+    );
+    if (logradouro) {
+      tentativas.push(`${logradouro}, ${cidadeUf}`);
+    }
+    tentativas.push(cidadeUf);
+  }
+
+  for (const q of tentativas) {
+    // 1ª tentativa: Photon (Komoot OSM)
+    try {
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Taxi20-B2B/1.0' } });
+      if (res.ok) {
+        const data = await res.json();
+        const coords = data.features?.[0]?.geometry?.coordinates;
+        if (coords && coords.length >= 2) {
+          return { lat: coords[1], lng: coords[0] };
+        }
+      }
+    } catch {}
+
+    // 2ª tentativa: OpenStreetMap Nominatim
+    try {
+      const urlNom = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`;
+      const resNom = await fetch(urlNom, { headers: { 'User-Agent': 'Taxi20-B2B/1.0' } });
+      if (resNom.ok) {
+        const dNom = await resNom.json();
+        if (dNom?.[0]?.lat && dNom?.[0]?.lon) {
+          return { lat: parseFloat(dNom[0].lat), lng: parseFloat(dNom[0].lon) };
+        }
+      }
+    } catch {}
+  }
+
+  return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -62,8 +103,18 @@ export async function POST(req: NextRequest) {
     const contratoConfig = MAPA_CONTRATOS[contratoId] || MAPA_CONTRATOS['claro-voll'];
 
     // 1. Geocodificar origem e destino
-    const coordsOrigem = await geocodificarEndereco(origem, -22.824, -43.003);
-    const coordsDestino = destino ? await geocodificarEndereco(destino, -22.814, -43.247) : null;
+    const coordsOrigem = await geocodificarEndereco(origem);
+    if (!coordsOrigem) {
+      return NextResponse.json(
+        {
+          status: false,
+          error: `Não foi possível localizar o endereço de origem no mapa: "${origem}". Por favor, informe a rua ou cidade.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const coordsDestino = destino ? await geocodificarEndereco(destino) : null;
 
     // 2. Formatar data e hora para DD/MM/AAAA HH:mm:00
     let dataFormatada = '';

@@ -70,6 +70,11 @@ export const ClassificationRuleValidator: React.FC<ClassificationRuleValidatorPr
                 </label>
 
                 <div className="flex items-center gap-1">
+                  {campo.chaveCampo === 'nomeSolicitante' && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">
+                      Nome Oficial
+                    </span>
+                  )}
                   {campo.origemPreenchimento === 'IA_EXTRAIDO' && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
                       <Sparkles className="w-2.5 h-2.5" /> IA
@@ -88,17 +93,36 @@ export const ClassificationRuleValidator: React.FC<ClassificationRuleValidatorPr
                 </div>
               </div>
 
-              <input
-                type="text"
-                value={valorAtual}
-                placeholder={`Informe ${campo.nomeExibicao.toLowerCase()}...`}
-                onChange={(e) => onAlterarValor(campo.chaveCampo, e.target.value)}
-                className={`w-full h-9 px-3 text-xs rounded-md border font-normal outline-none transition-colors bg-white ${
-                  isPendente
-                    ? 'border-red-400 text-slate-900 focus:border-red-500 focus:ring-2 focus:ring-red-100'
-                    : 'border-slate-300 text-slate-900 focus:border-slate-800 focus:ring-2 focus:ring-slate-100'
-                }`}
-              />
+              {campo.opcoesValidas && campo.opcoesValidas.length > 0 ? (
+                <select
+                  value={valorAtual}
+                  onChange={(e) => onAlterarValor(campo.chaveCampo, e.target.value)}
+                  className={`w-full h-9 px-3 text-xs rounded-md border font-medium outline-none transition-colors bg-white cursor-pointer ${
+                    isPendente
+                      ? 'border-red-400 text-slate-900 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+                      : 'border-slate-300 text-slate-900 focus:border-slate-800 focus:ring-2 focus:ring-slate-100'
+                  }`}
+                >
+                  <option value="">Selecione uma opção...</option>
+                  {campo.opcoesValidas.map((opcao) => (
+                    <option key={opcao} value={opcao}>
+                      {opcao}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={valorAtual}
+                  placeholder={`Informe ${campo.nomeExibicao.toLowerCase()}...`}
+                  onChange={(e) => onAlterarValor(campo.chaveCampo, e.target.value)}
+                  className={`w-full h-9 px-3 text-xs rounded-md border font-normal outline-none transition-colors bg-white ${
+                    isPendente
+                      ? 'border-red-400 text-slate-900 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+                      : 'border-slate-300 text-slate-900 focus:border-slate-800 focus:ring-2 focus:ring-slate-100'
+                  }`}
+                />
+              )}
 
               {campo.mensagemErro && (
                 <p className="text-[11px] font-medium text-red-600 flex items-center gap-1">

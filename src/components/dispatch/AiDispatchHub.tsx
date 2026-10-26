@@ -49,44 +49,35 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     id: 'unipar-voll',
     nomeExibicao: 'UNIPAR VOLL (Plataforma Voll)',
     uiCliente: '084dbe67-d889-49a6-af3e-8609d9122e23',
-    palavrasChave: ['unipar voll', 'unipar', 'carbocloro', 'unipar-m', 'camaçari'],
+    palavrasChave: ['unipar voll', 'unipar carbocloro voll', 'unipar-m', 'camaçari'],
     regras: [
       {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome do Passageiro',
+        descricaoAjuda: 'Nome completo do colaborador',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
         numeroCampo: 1,
-        nomeExibicao: 'Código do Agendamento / OS',
-        descricaoAjuda: 'Código da ordem no formato #UNIPAR-M18368822',
+        nomeExibicao: 'Login',
+        descricaoAjuda: 'Login ou identificador do usuário no sistema',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
       },
       {
         numeroCampo: 2,
-        nomeExibicao: 'Centro de Custo / Área',
-        descricaoAjuda: 'Centro contábil responsável pelo faturamento',
+        nomeExibicao: 'Telefone Passageiro',
+        descricaoAjuda: 'Telefone com DDD',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
       {
         numeroCampo: 3,
-        nomeExibicao: 'Projeto / Solicitação',
-        descricaoAjuda: 'Nome do projeto ou finalidade da viagem',
-        obrigatorio: false,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-      },
-      {
-        numeroCampo: 4,
-        nomeExibicao: 'Filial de Faturamento',
-        descricaoAjuda: 'Unidade operacional fixa',
+        nomeExibicao: 'Centro de Custo',
+        descricaoAjuda: 'Centro contábil Unipar',
         obrigatorio: true,
-        tipoPreenchimento: 'VALOR_FIXO_CONTRATO',
-        valorFixo: 'UNIPAR CAMAÇARI / BA',
-      },
-      {
-        numeroCampo: 5,
-        nomeExibicao: 'Matrícula do Aprovador',
-        descricaoAjuda: 'Herdada do cadastro do passageiro',
-        obrigatorio: false,
-        tipoPreenchimento: 'HERDADO_AUTORIZADO',
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
     ],
   },
@@ -94,37 +85,57 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     id: 'unipar-direto',
     nomeExibicao: 'UNIPAR (Corporativo Direto)',
     uiCliente: '4b5461d2-2dc4-4402-80a2-4ecbf97de9d7',
-    palavrasChave: ['unipar direto', 'unipar carbocloro', 'cubatão', 'santo andré'],
+    palavrasChave: ['unipar direto', 'unipar carbocloro', 'cubatão', 'santo andré', 'ucbr'],
     regras: [
       {
-        numeroCampo: 1,
-        nomeExibicao: 'Código da Ordem de Serviço (OS)',
-        descricaoAjuda: 'Código identificador no formato #UNIPAR-M2026',
+        numeroCampo: 0,
+        nomeExibicao: 'Nome (Colaborador / Solicitante)',
+        descricaoAjuda: 'Nome completo do solicitante ou passageiro',
         obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Empresa',
+        descricaoAjuda: 'Unidade operacional Unipar',
+        obrigatorio: false,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['UCBR - FC Cubatão', 'UCBR - SP Matriz', 'UNIPAR'],
       },
       {
         numeroCampo: 2,
         nomeExibicao: 'Centro de Custo',
-        descricaoAjuda: 'Centro contábil responsável pelo faturamento',
+        descricaoAjuda: 'Centro contábil da Unipar',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
       {
         numeroCampo: 3,
-        nomeExibicao: 'Projeto / Planta Industrial',
-        descricaoAjuda: 'Nome da planta ou projeto corporativo',
-        obrigatorio: false,
+        nomeExibicao: 'Matrícula',
+        descricaoAjuda: 'Matrícula funcional',
+        obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
       {
-        numeroCampo: 4,
-        nomeExibicao: 'Filial de Origem',
-        descricaoAjuda: 'Unidade operacional fixa',
+        numeroCampo: 5,
+        nomeExibicao: 'Gestor',
+        descricaoAjuda: 'Nome do gestor imediato',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+      {
+        numeroCampo: 6,
+        nomeExibicao: 'Justificativa',
+        descricaoAjuda: 'Motivo da viagem corporativa',
         obrigatorio: true,
-        tipoPreenchimento: 'VALOR_FIXO_CONTRATO',
-        valorFixo: 'UNIPAR CUBATÃO / SP',
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+      {
+        numeroCampo: 7,
+        nomeExibicao: 'Observação',
+        descricaoAjuda: 'Observações operacionais para o motorista',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
       },
     ],
   },
@@ -132,34 +143,36 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     id: 'claro-voll',
     nomeExibicao: 'CLARO VOLL (Plataforma Voll)',
     uiCliente: '94961e94-143a-49b8-a314-6db0bcb7a48d',
-    palavrasChave: ['claro voll', 'claro', 'embratel', 'net claro', 'claro brasil'],
+    palavrasChave: ['claro voll', 'claro', 'embratel', 'net claro', 'claro brasil', 'brasilcenter', '#claro'],
     regras: [
       {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome (Solicitante / Passageiro)',
+        descricaoAjuda: 'Nome oficial do colaborador',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
         numeroCampo: 1,
-        nomeExibicao: 'Código da Reserva / Chamado Claro',
-        descricaoAjuda: 'Número da reserva no app Voll (ex: #CLARO-M18456160)',
+        nomeExibicao: 'Voucher',
+        descricaoAjuda: 'Código da reserva ou voucher (ex: #CLARO-M18456160)',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
         regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
       },
       {
         numeroCampo: 2,
-        nomeExibicao: 'Centro de Custo Claro',
-        descricaoAjuda: 'Centro de custo contábil do colaborador Claro (opcional)',
-        obrigatorio: false,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        nomeExibicao: 'Empresa',
+        descricaoAjuda: 'Empresa autorizada',
+        obrigatorio: true,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['TÁXI 2.0', 'CLARO - BRASILCENTER', 'CLARO'],
+        valorFixo: 'TÁXI 2.0',
       },
       {
         numeroCampo: 3,
-        nomeExibicao: 'Regional / Unidade',
-        descricaoAjuda: 'Filial ou Regional Claro',
-        obrigatorio: false,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-      },
-      {
-        numeroCampo: 4,
-        nomeExibicao: 'Motivo da Corrida',
-        descricaoAjuda: 'Finalidade do deslocamento corporativo',
+        nomeExibicao: 'Informações - Contatos',
+        descricaoAjuda: 'Telefone ou ramal de contato',
         obrigatorio: false,
         tipoPreenchimento: 'MANUAL_LIVRE',
       },
@@ -169,36 +182,38 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     id: 'voll-geral',
     nomeExibicao: 'VOLL (Corporativo Geral)',
     uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
-    palavrasChave: ['voll', 'reserva voll', 'app voll', 'agendamento voll'],
+    palavrasChave: ['voll', 'itau', 'itaú', 'itau unibanco', 'itau-m', '#itau', 'reserva voll', 'app voll', 'agendamento voll'],
     regras: [
       {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome (Solicitante / Passageiro)',
+        descricaoAjuda: 'Nome oficial do colaborador',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
         numeroCampo: 1,
-        nomeExibicao: 'Código da Reserva / Voucher Voll',
-        descricaoAjuda: 'Identificador do agendamento Voll',
+        nomeExibicao: 'Voucher Voll',
+        descricaoAjuda: 'Identificador do agendamento Voll (ex: #ITAU-M18383400)',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
         regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
       },
       {
         numeroCampo: 2,
-        nomeExibicao: 'Centro de Custo',
-        descricaoAjuda: 'Centro de custo informado na solicitação',
+        nomeExibicao: 'Empresa',
+        descricaoAjuda: 'Empresa solicitante',
         obrigatorio: false,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['ITAU', 'VOLL', 'TAXI 2.0'],
       },
       {
         numeroCampo: 3,
-        nomeExibicao: 'Projeto / Motivo da Viagem',
-        descricaoAjuda: 'Finalidade da viagem',
-        obrigatorio: false,
-        tipoPreenchimento: 'MANUAL_LIVRE',
-      },
-      {
-        numeroCampo: 4,
-        nomeExibicao: 'Solicitante / Aprovador',
-        descricaoAjuda: 'Nome do gestor ou solicitante',
-        obrigatorio: false,
-        tipoPreenchimento: 'HERDADO_AUTORIZADO',
+        nomeExibicao: 'Código de Acesso',
+        descricaoAjuda: 'Código classificador na central (ex: itau-0002, itau-0001, voll-004)',
+        obrigatorio: true,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['itau-0002', 'itau-0001', 'voll-004', 'tx20-001'],
       },
     ],
   },
@@ -208,6 +223,13 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     uiCliente: 'CLIENTE_PADRAO_01',
     palavrasChave: [],
     regras: [
+      {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome',
+        descricaoAjuda: 'Nome do solicitante',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
       {
         numeroCampo: 1,
         nomeExibicao: 'Código do Chamado / OS',
@@ -446,22 +468,40 @@ export const AiDispatchHub: React.FC = () => {
     setFormObservacoes(dados.observacoesOperacionais || '');
 
     // Auto-detecção inteligente do contrato da empresa
-    const textoBusca = `${dados.empresaIdentificada || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''} ${dados.classificadores?.codigoOsChamado || ''}`.toLowerCase();
+    const textoBusca = `${dados.empresaIdentificada || ''} ${dados.classificadores?.codigoOsChamado || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''}`.toLowerCase();
 
     const contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) =>
       c.palavrasChave.some((kw) => textoBusca.includes(kw.toLowerCase()))
     );
 
+    const contratoFinalId = contratoDetectado ? contratoDetectado.id : contratoSelecionadoId;
     if (contratoDetectado) {
       setContratoSelecionadoId(contratoDetectado.id);
       setContratoAutoDetectado(true);
     }
 
+    // Pré-preenchimento automático dos classificadores e campo NOME
+    const novosValores: Record<string, string> = {};
+    if (dados.passageiro?.nome) {
+      novosValores['nomeSolicitante'] = dados.passageiro.nome;
+    }
+    if (dados.classificadores?.codigoOsChamado) {
+      novosValores['classificador1'] = dados.classificadores.codigoOsChamado;
+    }
+    if (dados.classificadores?.centroCusto) {
+      novosValores['classificador2'] = dados.classificadores.centroCusto;
+    }
+    if (/itau|itaú/i.test(textoBusca)) {
+      novosValores['classificador2'] = 'ITAU';
+      novosValores['classificador3'] = 'itau-0002';
+    }
+    setValoresManuais((prev) => ({ ...prev, ...novosValores }));
+
     consultarAutorizado(dados.passageiro.identificador || dados.passageiro.nome);
     calcularEstimativaRota(
       dados.origem.enderecoCompleto,
       dados.destino?.enderecoCompleto,
-      contratoDetectado?.id,
+      contratoFinalId,
       dados.agendamento.dataAgendamento,
       dados.agendamento.horaAgendamento
     );

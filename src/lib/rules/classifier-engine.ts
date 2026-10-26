@@ -2,11 +2,11 @@ import { RideExtractionData } from '../ai/schema';
 import { ClassificadoresTaxiDigital } from '../taxi-digital/types';
 
 export interface RegraClassificadorItem {
-  numeroCampo: number;
+  numeroCampo: number; // 0 para NOME / dsNomeSolicitante, 1 a 20 para classificador1..20
   nomeExibicao: string;
   descricaoAjuda?: string;
   obrigatorio: boolean;
-  tipoPreenchimento: 'EXTRAIDO_IA_REGEX' | 'HERDADO_AUTORIZADO' | 'VALOR_FIXO_CONTRATO' | 'LISTA_SUSPENSA' | 'MANUAL_LIVRE';
+  tipoPreenchimento: 'EXTRAIDO_IA_NOME' | 'EXTRAIDO_IA_REGEX' | 'HERDADO_AUTORIZADO' | 'VALOR_FIXO_CONTRATO' | 'LISTA_SUSPENSA' | 'MANUAL_LIVRE';
   regexPadrao?: string;
   valorFixo?: string;
   opcoesValidas?: string[];
@@ -23,6 +23,8 @@ export interface ResultadoValidacaoCampo {
   status: StatusValidacaoCampo;
   mensagemErro?: string;
   origemPreenchimento: 'MANUAL' | 'IA_EXTRAIDO' | 'HERDADO_PERFIL' | 'VALOR_FIXO' | 'VAZIO';
+  opcoesValidas?: string[];
+  tipoPreenchimento?: string;
 }
 
 export interface ResultadoRuleEngine {
@@ -44,6 +46,59 @@ export class ClassifierRuleEngine {
     const classificadoresProntos: ClassificadoresTaxiDigital = {};
     const resumoValores: Record<string, string> = {};
 
+    // 1. Processar Campo NOME (dsNomeSolicitante) se existir nas regras do contrato
+    const regraNome = regras.find((r) => r.numeroCampo === 0 || r.tipoPreenchimento === 'EXTRAIDO_IA_NOME');
+    if (regraNome) {
+      const chaveNome: keyof ClassificadoresTaxiDigital = 'nomeSolicitante';
+      let valorNome = '';
+      let origemNome: ResultadoValidacaoCampo['origemPreenchimento'] = 'VAZIO';
+
+      if (valoresInformadosManual[chaveNome] !== undefined && valoresInformadosManual[chaveNome] !== '') {
+        valorNome = valoresInformadosManual[chaveNome].trim();
+        origemNome = 'MANUAL';
+      } else if (dadosIa?.passageiro?.nome) {
+        valorNome = dadosIa.passageiro.nome.trim();
+        origemNome = 'IA_EXTRAIDO';
+      } else if (dadosAutorizado?.client_name) {
+        valorNome = dadosAutorizado.client_name.trim();
+        origemNome = 'HERDADO_PERFIL';
+      }
+
+      let valido = true;
+      let status: StatusValidacaoCampo = 'VALIDADO';
+      let mensagemErro: string | undefined;
+
+      if (!valorNome) {
+        if (regraNome.obrigatorio) {
+          valido = false;
+          status = 'PENDENTE_OBRIGATORIO';
+          mensagemErro = `O campo "${regraNome.nomeExibicao}" é obrigatório para este contrato.`;
+        } else {
+          status = 'OPCIONAL_VAZIO';
+        }
+      }
+
+      const itemNome: ResultadoValidacaoCampo = {
+        numeroCampo: 0,
+        chaveCampo: chaveNome,
+        nomeExibicao: regraNome.nomeExibicao,
+        valor: valorNome,
+        valido,
+        status,
+        mensagemErro,
+        origemPreenchimento: origemNome,
+        opcoesValidas: regraNome.opcoesValidas,
+        tipoPreenchimento: regraNome.tipoPreenchimento,
+      };
+
+      detalhesCampos.push(itemNome);
+      if (valorNome) {
+        classificadoresProntos[chaveNome] = valorNome;
+        resumoValores[chaveNome] = valorNome;
+      }
+    }
+
+    // 2. Processar Classificadores Numéricos (1 a 20)
     for (let i = 1; i <= 20; i++) {
       const chaveCampo = `classificador${i}` as keyof ClassificadoresTaxiDigital;
       const regra = regras.find((r) => r.numeroCampo === i);
@@ -60,6 +115,24 @@ export class ClassifierRuleEngine {
             if (regra.valorFixo) {
               valorFinal = regra.valorFixo.trim();
               origem = 'VALOR_FIXO';
+            }
+            break;
+
+          case 'LISTA_SUSPENSA':
+            if (regra.valorFixo) {
+              valorFinal = regra.valorFixo.trim();
+              origem = 'VALOR_FIXO';
+            } else if (regra.opcoesValidas && regra.opcoesValidas.length > 0) {
+              // Verificar se a IA encontrou alguma das opções
+              const textoIa = `${dadosIa?.empresaIdentificada || ''} ${dadosIa?.classificadores?.centroCusto || ''} ${dadosIa?.classificadores?.codigoOsChamado || ''}`.toLowerCase();
+              const encontrada = regra.opcoesValidas.find((op) => textoIa.includes(op.toLowerCase()));
+              if (encontrada) {
+                valorFinal = encontrada;
+                origem = 'IA_EXTRAIDO';
+              } else {
+                valorFinal = regra.opcoesValidas[0];
+                origem = 'VALOR_FIXO';
+              }
             }
             break;
 
@@ -82,7 +155,7 @@ export class ClassifierRuleEngine {
           case 'EXTRAIDO_IA_REGEX':
             if (dadosIa?.classificadores) {
               const cls = dadosIa.classificadores;
-              if (regra.nomeExibicao.toLowerCase().includes('os') || i === 1) {
+              if (regra.nomeExibicao.toLowerCase().includes('os') || regra.nomeExibicao.toLowerCase().includes('voucher') || i === 1) {
                 valorFinal = cls.codigoOsChamado || '';
               } else if (regra.nomeExibicao.toLowerCase().includes('centro') || i === 2) {
                 valorFinal = cls.centroCusto || '';
@@ -137,6 +210,8 @@ export class ClassifierRuleEngine {
         status,
         mensagemErro,
         origemPreenchimento: origem,
+        opcoesValidas: regra?.opcoesValidas,
+        tipoPreenchimento: regra?.tipoPreenchimento,
       };
 
       detalhesCampos.push(itemResultado);

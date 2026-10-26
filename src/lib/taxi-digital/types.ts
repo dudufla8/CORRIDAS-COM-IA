@@ -82,6 +82,7 @@ export interface EstimateBookingResponse {
 }
 
 export interface ClassificadoresTaxiDigital {
+  nomeSolicitante?: string;
   classificador1?: string;
   classificador2?: string;
   classificador3?: string;
