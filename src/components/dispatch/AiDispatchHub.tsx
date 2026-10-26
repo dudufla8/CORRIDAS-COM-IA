@@ -20,6 +20,8 @@ import {
   AlertCircle,
   MapPin,
   Check,
+  Copy,
+  Share2,
 } from 'lucide-react';
 import { RideExtractionData } from '../../lib/ai/schema';
 import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } from '../../lib/rules/classifier-engine';
@@ -36,6 +38,24 @@ export interface CategoriaTaxiDigital {
   capacidade?: number;
 }
 
+export interface DetalhesDespachoSucesso {
+  bookingId: string;
+  voucher: string;
+  status: string;
+  passageiroNome: string;
+  passageiroTelefone: string;
+  data: string;
+  hora: string;
+  tipo: string;
+  origem: string;
+  destino: string;
+  categoriaNome: string;
+  valorEstimado?: number;
+  contratoNome: string;
+  centroCusto?: string;
+  solicitante?: string;
+}
+
 export interface ContratoCorporativo {
   id: string;
   nomeExibicao: string;
@@ -46,10 +66,81 @@ export interface ContratoCorporativo {
 
 export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
   {
+    id: 'unipar-direto',
+    nomeExibicao: 'UNIPAR (Corporativo Direto)',
+    uiCliente: '4b5461d2-2dc4-4402-80a2-4ecbf97de9d7',
+    palavrasChave: [
+      'unipar direto',
+      'unipar carbocloro',
+      '@unipar.com',
+      'solange.olivieri@unipar.com',
+      '10300020',
+      'solange',
+      'traslado',
+      'cubatão',
+      'santo andré',
+      'ucbr',
+      'marcelo terra white',
+    ],
+    regras: [
+      {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome (Passageiro)',
+        descricaoAjuda: 'Nome completo do colaborador',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Empresa',
+        descricaoAjuda: 'Unidade operacional Unipar',
+        obrigatorio: true,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['UNIPAR CARBOCLORO', 'UCBR - FC Cubatão', 'UCBR - SP Matriz', 'UNIPAR'],
+        valorFixo: 'UNIPAR CARBOCLORO',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Centro de Custo',
+        descricaoAjuda: 'Centro contábil Unipar (ex: 10300020)',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Matrícula',
+        descricaoAjuda: 'Matrícula funcional (se informada)',
+        obrigatorio: false,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+      {
+        numeroCampo: 5,
+        nomeExibicao: 'Gestor / Solicitante',
+        descricaoAjuda: 'Nome do solicitante ou gestor imediato',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+      {
+        numeroCampo: 6,
+        nomeExibicao: 'Justificativa / Motivo',
+        descricaoAjuda: 'Motivo da viagem corporativa ou voo',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+      {
+        numeroCampo: 7,
+        nomeExibicao: 'Observação Operacional',
+        descricaoAjuda: 'Observações operacionais para o motorista',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+    ],
+  },
+  {
     id: 'unipar-voll',
     nomeExibicao: 'UNIPAR VOLL (Plataforma Voll)',
     uiCliente: '084dbe67-d889-49a6-af3e-8609d9122e23',
-    palavrasChave: ['unipar voll', 'unipar carbocloro voll', 'unipar-m', 'camaçari'],
+    palavrasChave: ['unipar voll', 'unipar-m', '#unipar-m', 'camaçari voll'],
     regras: [
       {
         numeroCampo: 0,
@@ -60,8 +151,8 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
       },
       {
         numeroCampo: 1,
-        nomeExibicao: 'Login',
-        descricaoAjuda: 'Login ou identificador do usuário no sistema',
+        nomeExibicao: 'Login / Voucher Voll',
+        descricaoAjuda: 'Código identificador Voll (#UNIPAR-M...)',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
@@ -69,7 +160,7 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
         numeroCampo: 2,
         nomeExibicao: 'Telefone Passageiro',
         descricaoAjuda: 'Telefone com DDD',
-        obrigatorio: true,
+        obrigatorio: false,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
       },
       {
@@ -78,64 +169,6 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
         descricaoAjuda: 'Centro contábil Unipar',
         obrigatorio: true,
         tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-      },
-    ],
-  },
-  {
-    id: 'unipar-direto',
-    nomeExibicao: 'UNIPAR (Corporativo Direto)',
-    uiCliente: '4b5461d2-2dc4-4402-80a2-4ecbf97de9d7',
-    palavrasChave: ['unipar direto', 'unipar carbocloro', 'cubatão', 'santo andré', 'ucbr'],
-    regras: [
-      {
-        numeroCampo: 0,
-        nomeExibicao: 'Nome (Colaborador / Solicitante)',
-        descricaoAjuda: 'Nome completo do solicitante ou passageiro',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
-      },
-      {
-        numeroCampo: 1,
-        nomeExibicao: 'Empresa',
-        descricaoAjuda: 'Unidade operacional Unipar',
-        obrigatorio: false,
-        tipoPreenchimento: 'LISTA_SUSPENSA',
-        opcoesValidas: ['UCBR - FC Cubatão', 'UCBR - SP Matriz', 'UNIPAR'],
-      },
-      {
-        numeroCampo: 2,
-        nomeExibicao: 'Centro de Custo',
-        descricaoAjuda: 'Centro contábil da Unipar',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-      },
-      {
-        numeroCampo: 3,
-        nomeExibicao: 'Matrícula',
-        descricaoAjuda: 'Matrícula funcional',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-      },
-      {
-        numeroCampo: 5,
-        nomeExibicao: 'Gestor',
-        descricaoAjuda: 'Nome do gestor imediato',
-        obrigatorio: false,
-        tipoPreenchimento: 'MANUAL_LIVRE',
-      },
-      {
-        numeroCampo: 6,
-        nomeExibicao: 'Justificativa',
-        descricaoAjuda: 'Motivo da viagem corporativa',
-        obrigatorio: true,
-        tipoPreenchimento: 'MANUAL_LIVRE',
-      },
-      {
-        numeroCampo: 7,
-        nomeExibicao: 'Observação',
-        descricaoAjuda: 'Observações operacionais para o motorista',
-        obrigatorio: false,
-        tipoPreenchimento: 'MANUAL_LIVRE',
       },
     ],
   },
@@ -282,18 +315,83 @@ export const AiDispatchHub: React.FC = () => {
   const [calculandoEstimativa, setCalculandoEstimativa] = useState(false);
   const [erroEstimativa, setErroEstimativa] = useState<string | null>(null);
   const [despachando, setDespachando] = useState(false);
-  const [resultadoDespacho, setResultadoDespacho] = useState<{ bookingId: string; voucher: string; status: string } | null>(null);
+  const [resultadoDespacho, setResultadoDespacho] = useState<DetalhesDespachoSucesso | null>(null);
+  const [copiadoVoucher, setCopiadoVoucher] = useState(false);
+  const [copiadoTextoCompleto, setCopiadoTextoCompleto] = useState(false);
 
   const taxiClientRef = useRef(new TaxiDigitalApiClient());
 
   const contratoAtual = CONTRATOS_DISPONIVEIS.find((c) => c.id === contratoSelecionadoId) || CONTRATOS_DISPONIVEIS[0];
 
+  // Execução contínua da Rule Engine conectada ao nome e classificadores
   const resultadoRules: ResultadoRuleEngine = ClassifierRuleEngine.executar(
     contratoAtual.regras,
-    extractedData || undefined,
+    {
+      ...extractedData,
+      passageiro: {
+        nome: formPassageiro.nome || extractedData?.passageiro?.nome || '',
+        telefone: formPassageiro.telefone || extractedData?.passageiro?.telefone,
+        identificador: formPassageiro.identificador || extractedData?.passageiro?.identificador,
+      },
+    },
     dadosAutorizado,
-    valoresManuais
+    {
+      ...valoresManuais,
+      nomeSolicitante: valoresManuais.nomeSolicitante || formPassageiro.nome || '',
+    }
   );
+
+  const handleCopiarVoucher = (codigo: string) => {
+    navigator.clipboard.writeText(codigo);
+    setCopiadoVoucher(true);
+    setTimeout(() => setCopiadoVoucher(false), 2500);
+  };
+
+  const handleCopiarConfirmacaoCompleta = (detalhes: DetalhesDespachoSucesso) => {
+    let dataFormatada = detalhes.data;
+    if (detalhes.data && detalhes.data.includes('-')) {
+      const [yyyy, mm, dd] = detalhes.data.split('-');
+      dataFormatada = `${dd}/${mm}/${yyyy}`;
+    }
+    const texto = `🚖 *CONFIRMAÇÃO DE TRASLADO - TÁXI 2.0*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 *VOUCHER / BOOKING ID:* ${detalhes.bookingId}
+🎫 *Código da Reserva / Ref:* ${detalhes.voucher}
+👤 *Passageiro:* ${detalhes.passageiroNome} (${detalhes.passageiroTelefone || 'Sem tel'})
+📅 *Data e Horário:* ${dataFormatada} às ${detalhes.hora}
+📍 *Embarque:* ${detalhes.origem}
+🏁 *Desembarque:* ${detalhes.destino || 'A definir'}
+🏢 *Contrato:* ${detalhes.contratoNome}
+🚗 *Categoria Táxi:* ${detalhes.categoriaNome}
+${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : ''}${detalhes.valorEstimado ? `💰 *Valor Estimado:* R$ ${detalhes.valorEstimado.toFixed(2)}\n` : ''}✅ *Status:* Agendado com sucesso na central Táxi Digital.`;
+
+    navigator.clipboard.writeText(texto);
+    setCopiadoTextoCompleto(true);
+    setTimeout(() => setCopiadoTextoCompleto(false), 2500);
+  };
+
+  const handleNovoAgendamento = () => {
+    setResultadoDespacho(null);
+    setImagePreview(null);
+    setTextInput('');
+    setExtractedData(null);
+    setFormPassageiro({ nome: '', telefone: '', identificador: '' });
+    setFormViagem({ data: '', hora: '', tipo: 'AGENDADO' });
+    setFormOrigem('');
+    setFormDestino('');
+    setFormObservacoes('');
+    setValoresManuais({});
+    setEstimativa(null);
+    setCategoriasDisponiveis([]);
+    setCategoriaSelecionadaId('');
+  };
+
+  const handleAlterarValorClassificador = (campo: string, valor: string) => {
+    setValoresManuais((prev) => ({ ...prev, [campo]: valor }));
+    if (campo === 'nomeSolicitante') {
+      setFormPassageiro((prev) => ({ ...prev, nome: valor }));
+    }
+  };
 
   // LISTENER DE CTRL+V (PASTE CLIPBOARD)
   useEffect(() => {
@@ -468,11 +566,22 @@ export const AiDispatchHub: React.FC = () => {
     setFormObservacoes(dados.observacoesOperacionais || '');
 
     // Auto-detecção inteligente do contrato da empresa
-    const textoBusca = `${dados.empresaIdentificada || ''} ${dados.classificadores?.codigoOsChamado || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''}`.toLowerCase();
+    const textoBusca = `${dados.empresaIdentificada || ''} ${dados.classificadores?.codigoOsChamado || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''} ${dados.observacoesOperacionais || ''} ${dados.classificadores?.centroCusto || ''}`.toLowerCase();
 
-    const contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) =>
-      c.palavrasChave.some((kw) => textoBusca.includes(kw.toLowerCase()))
-    );
+    let contratoDetectado: ContratoCorporativo | undefined;
+    if (/#unipar-m/i.test(textoBusca) || (textoBusca.includes('unipar') && textoBusca.includes('voll'))) {
+      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'unipar-voll');
+    } else if (textoBusca.includes('unipar') || textoBusca.includes('carbocloro') || textoBusca.includes('10300020') || textoBusca.includes('solange')) {
+      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'unipar-direto');
+    } else if (/#claro/i.test(textoBusca) || textoBusca.includes('claro') || textoBusca.includes('embratel')) {
+      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'claro-voll');
+    } else if (/#itau/i.test(textoBusca) || textoBusca.includes('itau') || textoBusca.includes('itaú') || textoBusca.includes('voll')) {
+      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'voll-geral');
+    } else {
+      contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) =>
+        c.palavrasChave.some((kw) => textoBusca.includes(kw.toLowerCase()))
+      );
+    }
 
     const contratoFinalId = contratoDetectado ? contratoDetectado.id : contratoSelecionadoId;
     if (contratoDetectado) {
@@ -485,15 +594,32 @@ export const AiDispatchHub: React.FC = () => {
     if (dados.passageiro?.nome) {
       novosValores['nomeSolicitante'] = dados.passageiro.nome;
     }
-    if (dados.classificadores?.codigoOsChamado) {
-      novosValores['classificador1'] = dados.classificadores.codigoOsChamado;
-    }
-    if (dados.classificadores?.centroCusto) {
-      novosValores['classificador2'] = dados.classificadores.centroCusto;
-    }
-    if (/itau|itaú/i.test(textoBusca)) {
-      novosValores['classificador2'] = 'ITAU';
-      novosValores['classificador3'] = 'itau-0002';
+
+    if (contratoFinalId === 'unipar-direto') {
+      novosValores['classificador1'] = 'UNIPAR CARBOCLORO';
+      novosValores['classificador2'] = dados.classificadores?.centroCusto || '10300020';
+      if (dados.classificadores?.solicitante) {
+        novosValores['classificador5'] = dados.classificadores.solicitante;
+      }
+      if (dados.observacoesOperacionais) {
+        novosValores['classificador6'] = dados.observacoesOperacionais;
+      }
+    } else if (contratoFinalId === 'claro-voll') {
+      if (dados.classificadores?.codigoOsChamado) {
+        novosValores['classificador1'] = dados.classificadores.codigoOsChamado;
+      }
+      novosValores['classificador2'] = 'TÁXI 2.0';
+    } else {
+      if (dados.classificadores?.codigoOsChamado) {
+        novosValores['classificador1'] = dados.classificadores.codigoOsChamado;
+      }
+      if (dados.classificadores?.centroCusto) {
+        novosValores['classificador2'] = dados.classificadores.centroCusto;
+      }
+      if (/itau|itaú/i.test(textoBusca)) {
+        novosValores['classificador2'] = 'ITAU';
+        novosValores['classificador3'] = 'itau-0002';
+      }
     }
     setValoresManuais((prev) => ({ ...prev, ...novosValores }));
 
@@ -633,10 +759,23 @@ export const AiDispatchHub: React.FC = () => {
         throw new Error(res.error || 'A central Táxi Digital rejeitou o agendamento.');
       }
 
+      const catEscolhida = categoriasDisponiveis.find((c) => c.id === categoriaSelecionadaId);
       setResultadoDespacho({
-        bookingId: String(res.booking_id),
+        bookingId: String(res.booking_id || res.voucher || 'VCH-TD'),
         voucher: res.voucher || 'VCH-AUTO',
-        status: res.status_corrida || 'AGENDADA',
+        status: res.status_corrida || (formViagem.tipo === 'IMEDIATO' ? 'EM DESPACHO' : 'AGENDADA'),
+        passageiroNome: formPassageiro.nome,
+        passageiroTelefone: formPassageiro.telefone,
+        data: formViagem.data,
+        hora: formViagem.hora,
+        tipo: formViagem.tipo,
+        origem: formOrigem,
+        destino: formDestino,
+        categoriaNome: catEscolhida?.nome || 'Táxi Convencional',
+        valorEstimado: estimativa?.valor,
+        contratoNome: contratoAtual.nomeExibicao,
+        centroCusto: resultadoRules.classificadoresProntos.classificador2 || '',
+        solicitante: resultadoRules.classificadoresProntos.nomeSolicitante || '',
       });
     } catch (err: any) {
       console.error('Falha no despacho:', err);
@@ -688,7 +827,157 @@ export const AiDispatchHub: React.FC = () => {
         </div>
       </header>
 
-      {/* FEEDBACK DE CORRIDA AGENDADA */}
+      {/* MODAL OFICIAL DE CONFIRMAÇÃO DO SERVIÇO AGENDADO */}
+      {resultadoDespacho && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
+            {/* Faixa Superior de Sucesso */}
+            <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 p-6 text-white text-center relative">
+              <button
+                onClick={() => setResultadoDespacho(null)}
+                className="absolute top-4 right-4 text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                title="Fechar modal"
+              >
+                ✕
+              </button>
+              <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-white text-emerald-600 flex items-center justify-center shadow-md">
+                <Check className="w-8 h-8 stroke-[3]" />
+              </div>
+              <h3 className="text-xl font-bold tracking-tight">Serviço Agendado com Sucesso!</h3>
+              <p className="text-xs text-emerald-100 mt-1">
+                Corrida transmitida e confirmada pela Central Táxi Digital
+              </p>
+            </div>
+
+            {/* Destaque Central: VOUCHER / BOOKING ID */}
+            <div className="p-6 space-y-5">
+              <div className="p-4 bg-emerald-50/70 border-2 border-emerald-500/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>Número do Voucher (Booking ID)</span>
+                    <span className="bg-emerald-100 text-emerald-800 text-[9px] px-1.5 py-0.2 rounded font-semibold">Oficial</span>
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-mono font-black text-slate-900 tracking-wider mt-1">
+                    {resultadoDespacho.bookingId}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    Ref. / Código da Reserva: <span className="font-semibold text-slate-800 font-mono">{resultadoDespacho.voucher}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleCopiarVoucher(resultadoDespacho.bookingId)}
+                  className={`px-4 py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer ${
+                    copiadoVoucher
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-900 hover:bg-slate-800 text-white'
+                  }`}
+                >
+                  {copiadoVoucher ? (
+                    <>
+                      <Check className="w-4 h-4 stroke-[2.5]" />
+                      <span>Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copiar ID</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Detalhes do Serviço Agendado */}
+              <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50/70 p-3.5 rounded-xl border border-slate-200/80">
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 block">Passageiro</span>
+                  <span className="font-semibold text-slate-900 truncate block">{resultadoDespacho.passageiroNome}</span>
+                  {resultadoDespacho.passageiroTelefone && (
+                    <span className="text-[11px] text-slate-500">{resultadoDespacho.passageiroTelefone}</span>
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 block">Data e Horário</span>
+                  <span className="font-semibold text-slate-900 block">
+                    {resultadoDespacho.data} às {resultadoDespacho.hora}
+                  </span>
+                  <span className="text-[10px] text-emerald-700 font-medium bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                    {resultadoDespacho.status}
+                  </span>
+                </div>
+
+                <div className="col-span-2 pt-2 border-t border-slate-200/60">
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 block">Origem (Embarque)</span>
+                  <span className="font-medium text-slate-800 line-clamp-1">{resultadoDespacho.origem}</span>
+                </div>
+
+                {resultadoDespacho.destino && (
+                  <div className="col-span-2">
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Destino (Desembarque)</span>
+                    <span className="font-medium text-slate-800 line-clamp-1">{resultadoDespacho.destino}</span>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-200/60">
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 block">Categoria Táxi</span>
+                  <span className="font-medium text-slate-800">{resultadoDespacho.categoriaNome}</span>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200/60 text-right">
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 block">Tarifa Prevista</span>
+                  <span className="font-bold text-slate-900">
+                    {resultadoDespacho.valorEstimado ? `R$ ${resultadoDespacho.valorEstimado.toFixed(2)}` : 'Tarifa Padrão'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Botões de Ação */}
+              <div className="space-y-2 pt-1">
+                <button
+                  onClick={() => handleCopiarConfirmacaoCompleta(resultadoDespacho)}
+                  className={`w-full py-3 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer ${
+                    copiadoTextoCompleto
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                >
+                  {copiadoTextoCompleto ? (
+                    <>
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>Mensagem Completa Copiada!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-4 h-4" />
+                      <span>Copiar Confirmação Formatada (WhatsApp / E-mail)</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleNovoAgendamento}
+                    className="flex-1 py-2.5 px-3 rounded-lg border border-slate-300 hover:bg-slate-50 text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Novo Agendamento</span>
+                  </button>
+
+                  <button
+                    onClick={() => setResultadoDespacho(null)}
+                    className="py-2.5 px-4 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-medium text-slate-700 transition-colors cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BANNER PERSISTENTE DE STATUS NO TOPO */}
       {resultadoDespacho && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6">
           <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-950 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -701,16 +990,25 @@ export const AiDispatchHub: React.FC = () => {
                   Corrida transmitida com sucesso para a frota!
                 </h4>
                 <p className="text-xs text-emerald-800">
-                  ID Táxi Digital: <span className="font-mono font-bold">{resultadoDespacho.bookingId}</span> • Voucher: <span className="font-mono font-bold">{resultadoDespacho.voucher}</span>
+                  Voucher / Booking ID: <span className="font-mono font-bold">{resultadoDespacho.bookingId}</span> • Ref: <span className="font-mono font-bold">{resultadoDespacho.voucher}</span>
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => setResultadoDespacho(null)}
-              className="text-xs font-medium text-emerald-800 hover:text-emerald-950 underline px-3 py-1"
-            >
-              Fechar aviso
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleCopiarConfirmacaoCompleta(resultadoDespacho)}
+                className="text-xs font-semibold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-md flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copiar Confirmação</span>
+              </button>
+              <button
+                onClick={() => setResultadoDespacho(null)}
+                className="text-xs font-medium text-emerald-800 hover:text-emerald-950 underline px-2 py-1 cursor-pointer"
+              >
+                Fechar aviso
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1063,7 +1361,11 @@ export const AiDispatchHub: React.FC = () => {
                       type="text"
                       value={formPassageiro.nome}
                       placeholder="Nome do colaborador"
-                      onChange={(e) => setFormPassageiro({ ...formPassageiro, nome: e.target.value })}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormPassageiro((prev) => ({ ...prev, nome: val }));
+                        setValoresManuais((prev) => ({ ...prev, nomeSolicitante: val }));
+                      }}
                       className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900"
                     />
                   </div>
@@ -1073,7 +1375,7 @@ export const AiDispatchHub: React.FC = () => {
                       type="text"
                       value={formPassageiro.telefone}
                       placeholder="(00) 00000-0000"
-                      onChange={(e) => setFormPassageiro({ ...formPassageiro, telefone: e.target.value })}
+                      onChange={(e) => setFormPassageiro((prev) => ({ ...prev, telefone: e.target.value }))}
                       className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900"
                     />
                   </div>
@@ -1169,9 +1471,7 @@ export const AiDispatchHub: React.FC = () => {
               <ClassificationRuleValidator
                 resultado={resultadoRules}
                 valoresManuais={valoresManuais}
-                onAlterarValor={(campo, val) =>
-                  setValoresManuais((prev) => ({ ...prev, [campo]: val }))
-                }
+                onAlterarValor={handleAlterarValorClassificador}
               />
 
               {/* OBSERVAÇÕES OPERACIONAIS */}

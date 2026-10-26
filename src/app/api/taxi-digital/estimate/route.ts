@@ -24,37 +24,50 @@ const MAPA_CONTRATOS: Record<string, ContratoConfig> = {
   },
 };
 
+function limparEnderecoParaGeocode(endereco: string): string {
+  if (!endereco) return '';
+  return endereco
+    .replace(/[—–]/g, '-')
+    .replace(/\s+/g, ' ')
+    // Remover complementos residenciais comuns que atrapalham o geocoder (casa 07, apto, bloco, etc.)
+    .replace(/,\s*(?:casa|apto?|apartamento|bloco|lote|sala|andar|cj|conjunto)\s*[a-zA-Z0-9º°\-_/]+/gi, '')
+    // Converter "em Cidade" para ", Cidade"
+    .replace(/\s+em\s+([A-Za-zÀ-ÿ\s]+)/gi, ', $1')
+    .replace(/\s*,\s*,+/g, ',')
+    .trim();
+}
+
 async function geocodificarEndereco(endereco: string) {
   if (!endereco) return null;
   const tentativas: string[] = [];
-
-  // 1. Endereço completo com espaços limpos
-  const limpo = endereco.replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const limpo = limparEnderecoParaGeocode(endereco);
   tentativas.push(limpo);
 
-  // 2. Se tiver hífens (ex: 'Banco Itaú - Agência 0253 - Avenida...'), testar progressivamente sem prefixos comerciais
-  const partes = limpo.split('-').map((p) => p.trim()).filter(Boolean);
-  if (partes.length > 1) {
-    for (let i = 1; i < partes.length; i++) {
-      tentativas.push(partes.slice(i).join(', '));
+  // Se tiver Santos ou cidades conhecidas de SP sem UF, acrescentar ", SP, Brasil"
+  if (/santos/i.test(limpo) && !/sp\b|são paulo/i.test(limpo)) {
+    tentativas.push(`${limpo}, SP, Brasil`);
+    tentativas.push(`Santos, SP, Brasil`);
+  } else if (!/brasil|brazil/i.test(limpo)) {
+    tentativas.push(`${limpo}, Brasil`);
+  }
+
+  // Se tiver hífens, testar sem prefixos comerciais
+  const partesHifen = limpo.split('-').map((p) => p.trim()).filter(Boolean);
+  if (partesHifen.length > 1) {
+    for (let i = 1; i < partesHifen.length; i++) {
+      tentativas.push(partesHifen.slice(i).join(', '));
     }
   }
 
-  // 3. Testar logradouro + cidade + UF
-  const matchCidadeUf = limpo.match(/([A-Za-zÀ-ÿ\s]+)\s*[-,\/]\s*([A-Za-z]{2})/);
-  if (matchCidadeUf) {
-    const cidadeUf = matchCidadeUf[0];
-    const logradouro = partes.find((p) =>
-      /^(rua|r\.|av|avenida|alameda|al\.|travessa|rodovia|estrada|praça|pça)/i.test(p)
-    );
-    if (logradouro) {
-      tentativas.push(`${logradouro}, ${cidadeUf}`);
-    }
-    tentativas.push(cidadeUf);
+  // Tentar apenas Logradouro + Cidade
+  const partesVirgula = limpo.split(',').map((p) => p.trim()).filter(Boolean);
+  if (partesVirgula.length >= 2) {
+    const logradouro = partesVirgula[0];
+    const cidade = partesVirgula[partesVirgula.length - 1];
+    tentativas.push(`${logradouro}, ${cidade}, Brasil`);
   }
 
   for (const q of tentativas) {
-    // 1ª tentativa: Photon (Komoot OSM)
     try {
       const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`;
       const res = await fetch(url, { headers: { 'User-Agent': 'Taxi20-B2B/1.0' } });
@@ -67,7 +80,6 @@ async function geocodificarEndereco(endereco: string) {
       }
     } catch {}
 
-    // 2ª tentativa: OpenStreetMap Nominatim
     try {
       const urlNom = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`;
       const resNom = await fetch(urlNom, { headers: { 'User-Agent': 'Taxi20-B2B/1.0' } });
@@ -192,8 +204,12 @@ export async function POST(req: NextRequest) {
       }
 
       let distNum = 0;
-      if (cat.distance) {
+      if (typeof cat.distance === 'number') {
+        distNum = cat.distance;
+      } else if (cat.distance) {
         distNum = parseFloat(String(cat.distance).replace(',', '.'));
+      } else if (cat.taximeter_configs && cat.taximeter_configs.length > 0 && cat.taximeter_configs[0].distance) {
+        distNum = parseFloat(String(cat.taximeter_configs[0].distance).replace(',', '.'));
       }
 
       return {

@@ -76,6 +76,22 @@ export class ClassifierRuleEngine {
         } else {
           status = 'OPCIONAL_VAZIO';
         }
+      } else {
+        // Validação de consistência do campo Nome com os demais classificadores:
+        // 1. Não pode conter código alfanumérico de chamado/voucher (#, números excessivos)
+        if (/#|[0-9]{3,}|(?:VOUCHER|CHAMADO|RESERVA)/i.test(valorNome)) {
+          valido = false;
+          status = 'FORMATO_INVALIDO';
+          mensagemErro = 'Nome inválido. O campo não pode conter código de voucher ou números.';
+        } else {
+          // 2. Deve conter nome e sobrenome (mínimo 2 partes e 5 caracteres)
+          const partesNome = valorNome.trim().split(/\s+/).filter(Boolean);
+          if (partesNome.length < 2 || valorNome.length < 5) {
+            valido = false;
+            status = 'FORMATO_INVALIDO';
+            mensagemErro = 'Informe o nome e sobrenome completos do colaborador.';
+          }
+        }
       }
 
       const itemNome: ResultadoValidacaoCampo = {

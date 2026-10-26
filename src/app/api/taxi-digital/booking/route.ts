@@ -35,33 +35,42 @@ const MAPA_CONTRATOS: Record<string, ContratoConfig> = {
   },
 };
 
+function limparEnderecoParaGeocode(endereco: string): string {
+  if (!endereco) return '';
+  return endereco
+    .replace(/[—–]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/,\s*(?:casa|apto?|apartamento|bloco|lote|sala|andar|cj|conjunto)\s*[a-zA-Z0-9º°\-_/]+/gi, '')
+    .replace(/\s+em\s+([A-Za-zÀ-ÿ\s]+)/gi, ', $1')
+    .replace(/\s*,\s*,+/g, ',')
+    .trim();
+}
+
 async function geocodificarEndereco(endereco: string) {
   if (!endereco) return null;
   const tentativas: string[] = [];
-
-  // 1. Endereço completo com espaços limpos
-  const limpo = endereco.replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const limpo = limparEnderecoParaGeocode(endereco);
   tentativas.push(limpo);
 
-  // 2. Se tiver hífens (ex: 'Banco Itaú - Agência 0253 - Avenida...'), testar progressivamente sem prefixos comerciais
-  const partes = limpo.split('-').map((p) => p.trim()).filter(Boolean);
-  if (partes.length > 1) {
-    for (let i = 1; i < partes.length; i++) {
-      tentativas.push(partes.slice(i).join(', '));
+  if (/santos/i.test(limpo) && !/sp\b|são paulo/i.test(limpo)) {
+    tentativas.push(`${limpo}, SP, Brasil`);
+    tentativas.push(`Santos, SP, Brasil`);
+  } else if (!/brasil|brazil/i.test(limpo)) {
+    tentativas.push(`${limpo}, Brasil`);
+  }
+
+  const partesHifen = limpo.split('-').map((p) => p.trim()).filter(Boolean);
+  if (partesHifen.length > 1) {
+    for (let i = 1; i < partesHifen.length; i++) {
+      tentativas.push(partesHifen.slice(i).join(', '));
     }
   }
 
-  // 3. Testar logradouro + cidade + UF
-  const matchCidadeUf = limpo.match(/([A-Za-zÀ-ÿ\s]+)\s*[-,\/]\s*([A-Za-z]{2})/);
-  if (matchCidadeUf) {
-    const cidadeUf = matchCidadeUf[0];
-    const logradouro = partes.find((p) =>
-      /^(rua|r\.|av|avenida|alameda|al\.|travessa|rodovia|estrada|praça|pça)/i.test(p)
-    );
-    if (logradouro) {
-      tentativas.push(`${logradouro}, ${cidadeUf}`);
-    }
-    tentativas.push(cidadeUf);
+  const partesVirgula = limpo.split(',').map((p) => p.trim()).filter(Boolean);
+  if (partesVirgula.length >= 2) {
+    const logradouro = partesVirgula[0];
+    const cidade = partesVirgula[partesVirgula.length - 1];
+    tentativas.push(`${logradouro}, ${cidade}, Brasil`);
   }
 
   for (const q of tentativas) {
@@ -136,10 +145,12 @@ export async function POST(req: NextRequest) {
     const dataHoraRef = `${dataFormatada} ${horaFormatada}:00`;
 
     // 3. Obter Categoria de Táxi para a região (ou utilizar a selecionada pelo operador)
+    // Reanálise de categorias: NUNCA usar categoria fixa, pois sempre depende da origem da corrida!
     let categoryId: number | undefined = categoryIdFromBody ? Number(categoryIdFromBody) : undefined;
     if (!categoryId) {
       try {
-        const catRes = await fetch(`${baseUrl}/api/booking/categories/json`, {
+        // Tentar buscar categorias via /estimate com origem e destino reais
+        const estRes = await fetch(`${baseUrl}/api/booking/estimate/json`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -150,56 +161,103 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             init_lat: coordsOrigem.lat,
             init_lng: coordsOrigem.lng,
+            end_lat: coordsDestino?.lat,
+            end_lng: coordsDestino?.lng,
             reference_date: dataHoraRef,
           }),
         });
 
-        if (catRes.ok) {
-          const catData = await catRes.json();
-          const cats = catData.data?.categories || [];
+        if (estRes.ok) {
+          const estData = await estRes.json();
+          const cats = estData.data?.categories || [];
           if (cats.length > 0) {
             categoryId = Number(cats[0].category_id);
           }
         }
-      } catch (catErr) {
-        console.warn('[Táxi Digital] Erro ao buscar categoria:', catErr);
+      } catch (estErr) {
+        console.warn('[Táxi Digital] Erro ao estimar categoria por rota:', estErr);
+      }
+
+      // Se não retornou em estimate, tentar /categories
+      if (!categoryId) {
+        try {
+          const catRes = await fetch(`${baseUrl}/api/booking/categories/json`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Versao': '3',
+              Authorization: authHeader,
+              'X-uiCliente': contratoConfig.uiCliente,
+            },
+            body: JSON.stringify({
+              init_lat: coordsOrigem.lat,
+              init_lng: coordsOrigem.lng,
+              reference_date: dataHoraRef,
+            }),
+          });
+
+          if (catRes.ok) {
+            const catData = await catRes.json();
+            const cats = catData.data?.categories || [];
+            if (cats.length > 0) {
+              categoryId = Number(cats[0].category_id);
+            }
+          }
+        } catch (catErr) {
+          console.warn('[Táxi Digital] Erro ao buscar categoria regional:', catErr);
+        }
       }
     }
 
     if (!categoryId) {
-      categoryId = 13086; // Fallback para categoria padrão da região
+      return NextResponse.json(
+        {
+          status: false,
+          error: `Nenhuma frota ou categoria da Táxi Digital encontrada para a origem "${origem}". Verifique se o contrato atende esta região geográfica.`,
+        },
+        { status: 400 }
+      );
     }
 
     // 4. Formatar telefone (apenas números)
     const telLimpo = (passageiroTelefone || '').replace(/\D/g, '') || '21968140578';
     const ddi = 55;
 
-    // 5. Extrair código de agendamento/voucher do classificador 1 (remover '#' se houver)
-    const voucherCodigo = classificadores.classificador1 || `PORTAL-${Date.now()}`;
+    // 5. Extrair código de agendamento/voucher
+    const voucherCodigo =
+      classificadores.codigoOsChamado ||
+      classificadores.classificador1 ||
+      (contratoId === 'unipar-direto' ? `UNIPAR-${Date.now().toString().slice(-6)}` : `PORTAL-${Date.now().toString().slice(-6)}`);
     const cleanVoucher = voucherCodigo.replace(/^#/, '').trim();
 
     // Extrair número do endereço se presente
     const matchNumero = (origem || '').match(/,\s*(\d+)/) || (origem || '').match(/\bN[º°]?\s*(\d+)/i);
     const numeroOrigem = matchNumero ? matchNumero[1] : '';
 
-    // 6. Montar classificadores estruturados para a API Táxi Digital
+    // 6. Montar classificadores estruturados dinâmicos para a API Táxi Digital (campos 1 a 20)
     const classificatorsArray: Array<{ field: number; field_value: string; field_id?: number }> = [];
-    classificatorsArray.push({
-      field: 1,
-      field_value: cleanVoucher,
-    });
 
-    if (contratoId === 'claro-voll') {
-      // No contrato Claro Voll, o classificador 2 é fixo como 'TÁXI 2.0' (id 5478219)
+    for (let i = 1; i <= 20; i++) {
+      const chave = `classificador${i}` as keyof typeof classificadores;
+      const valor = classificadores[chave];
+      if (valor && typeof valor === 'string' && valor.trim()) {
+        const item: { field: number; field_value: string; field_id?: number } = {
+          field: i,
+          field_value: valor.trim().replace(/^#/, ''),
+        };
+        if (contratoId === 'claro-voll' && i === 2) {
+          item.field_id = 5478219;
+          item.field_value = 'TÁXI 2.0';
+        }
+        classificatorsArray.push(item);
+      }
+    }
+
+    // Se nenhum classificador 1 estiver preenchido, garantir o voucher principal
+    if (!classificatorsArray.some((c) => c.field === 1)) {
       classificatorsArray.push({
-        field: 2,
-        field_id: 5478219,
-        field_value: 'TÁXI 2.0',
-      });
-    } else if (classificadores.classificador2) {
-      classificatorsArray.push({
-        field: 2,
-        field_value: classificadores.classificador2,
+        field: 1,
+        field_value: cleanVoucher,
       });
     }
 
@@ -208,12 +266,14 @@ export async function POST(req: NextRequest) {
 
     // 8. Payload oficial de criação de corrida
     const isAgendada = tipo !== 'IMEDIATO';
+    const nomeSolicitante = classificadores.nomeSolicitante || passageiroNome || 'Colaborador';
+
     const payloadAdd = {
       user_email: contratoConfig.userEmail,
       user_phone_ddi: ddi,
       user_phone: telLimpo,
       user_name: passageiroNome || 'Colaborador',
-      requester_name: passageiroNome || 'Colaborador',
+      requester_name: nomeSolicitante,
       booking_hash: bookingHash,
       external_authorization_id: cleanVoucher,
       init_address_name: origem || 'Endereço de Embarque',
@@ -243,8 +303,9 @@ export async function POST(req: NextRequest) {
     console.log('[Táxi Digital] Transmitindo agendamento para a central:', {
       contrato: contratoConfig.contractNumber,
       passageiro: passageiroNome,
-      voucher: voucherCodigo,
+      voucher: cleanVoucher,
       categoria: categoryId,
+      origem: origem,
     });
 
     const addRes = await fetch(`${baseUrl}/api/booking/add/json`, {
@@ -272,10 +333,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const bookingId = String(addData.booking_code || addData.booking_id || addData.data || '');
+
     return NextResponse.json({
       status: true,
-      booking_id: String(addData.booking_code || addData.data),
-      voucher: voucherCodigo,
+      booking_id: bookingId,
+      voucher: cleanVoucher,
       status_corrida: isAgendada ? 'AGENDADA' : 'EM_DESPACHO',
       register_date: addData.register_date,
       message: addData.message || 'Corrida agendada com sucesso na rede Táxi Digital.',
