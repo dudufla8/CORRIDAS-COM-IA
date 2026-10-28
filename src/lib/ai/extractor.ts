@@ -251,32 +251,105 @@ export class AiDispatchExtractorService {
   }
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
-    const configuredModel = process.env.GEMINI_MODEL;
-    // O modelo gemini-3.8-flash foi solicitado pela Google AI como substituto dos modelos descontinuados 2.5/2.0.
-    // Incluímos gemini-1.5-flash e gemini-1.5-pro como fallbacks universais estáveis.
-    const models = Array.from(new Set([
+    const configuredModel = process.env.GEMINI_MODEL?.trim();
+    // Prioridade de modelos: o modelo configurado/solicitado gemini-3.8-flash, seguido de fallbacks estáveis
+    const priorityModels = [
       configuredModel,
       'gemini-3.8-flash',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-exp',
       'gemini-1.5-flash',
+      'gemini-1.5-flash-latest',
       'gemini-1.5-pro',
-    ].filter(Boolean))) as string[];
+      'gemini-1.5-pro-latest',
+    ].filter(Boolean) as string[];
+
+    const modelCandidates = Array.from(new Set(priorityModels.map((m) => m.replace(/^models\//, ''))));
 
     let lastError: any = null;
+    const errorsLog: string[] = [];
 
-    for (const model of models) {
-      try {
-        return await this.executarChamadaGemini(input, dataRef, model);
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[Gemini API] Falha no modelo ${model}:`, err.message);
+    // 1. Tentar os modelos prioritários em v1beta e v1
+    for (const model of modelCandidates) {
+      for (const apiVersion of ['v1beta', 'v1'] as const) {
+        try {
+          return await this.executarChamadaGemini(input, dataRef, model, apiVersion);
+        } catch (err: any) {
+          lastError = err;
+          errorsLog.push(`${apiVersion}/${model}: ${err.message}`);
+          console.warn(`[Gemini API] Falha no modelo ${model} (${apiVersion}):`, err.message);
+
+          // Se for erro definitivo de autenticação, aborta o loop
+          if (err.message?.includes('API_KEY_INVALID') || err.message?.includes('PERMISSION_DENIED')) {
+            throw new Error(`Chave do Gemini inválida ou sem permissão de acesso (Google API): ${err.message}`);
+          }
+        }
       }
     }
 
-    throw lastError || new Error('Não foi possível obter resposta válida da IA Gemini.');
+    // 2. Se os modelos prioritários falharem, consulta dinamicamente ListModels para descobrir os modelos ativos para esta chave
+    try {
+      console.log('[Gemini API] Consultando ListModels para descobrir modelos ativos para esta chave...');
+      const modelosDisponiveis = await this.obterModelosDisponiveis();
+      if (modelosDisponiveis.length > 0) {
+        const novosModelos = modelosDisponiveis.filter((m) => !modelCandidates.includes(m));
+        for (const model of novosModelos) {
+          for (const apiVersion of ['v1beta', 'v1'] as const) {
+            try {
+              return await this.executarChamadaGemini(input, dataRef, model, apiVersion);
+            } catch (err: any) {
+              lastError = err;
+              errorsLog.push(`${apiVersion}/${model}: ${err.message}`);
+              console.warn(`[Gemini API - Dinâmico] Falha no modelo ${model} (${apiVersion}):`, err.message);
+            }
+          }
+        }
+      }
+    } catch (listErr: any) {
+      console.warn('[Gemini API] Falha ao consultar ListModels:', listErr.message);
+    }
+
+    const mensagemErro = lastError?.message || 'Nenhum modelo compatível da IA Gemini respondeu.';
+    throw new Error(`${mensagemErro} (Modelos testados: ${modelCandidates.slice(0, 3).join(', ')})`);
   }
 
-  private async executarChamadaGemini(input: ExtractionInput, dataRef: string, model: string): Promise<RideExtractionData> {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+  private async obterModelosDisponiveis(): Promise<string[]> {
+    for (const apiVersion of ['v1beta', 'v1']) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/${apiVersion}/models?key=${this.apiKey}`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' } }
+        );
+        if (response.ok) {
+          const json = await response.json();
+          const models: string[] = (json.models || [])
+            .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+            .map((m: any) => m.name?.replace(/^models\//, ''))
+            .filter(Boolean);
+
+          if (models.length > 0) {
+            return models.sort((a, b) => {
+              const aIsFlash = a.includes('flash') ? 1 : 0;
+              const bIsFlash = b.includes('flash') ? 1 : 0;
+              return bIsFlash - aIsFlash;
+            });
+          }
+        }
+      } catch {
+        // Tenta próxima versão se falhar
+      }
+    }
+    return [];
+  }
+
+  private async executarChamadaGemini(
+    input: ExtractionInput,
+    dataRef: string,
+    model: string,
+    apiVersion: 'v1beta' | 'v1' = 'v1beta'
+  ): Promise<RideExtractionData> {
+    const cleanModel = model.replace(/^models\//, '');
+    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${cleanModel}:generateContent?key=${this.apiKey}`;
     const parts: any[] = [
       { text: `${SYSTEM_PROMPT_DESPACHO_B2B}\n\nData e hora atual de referência: ${dataRef}` }
     ];
@@ -286,9 +359,10 @@ export class AiDispatchExtractorService {
       const mimeType = match ? match[1] : (input.mimeType || 'image/png');
       const base64Data = input.conteudo.replace(/^data:[^;]+;base64,/, '');
 
+      // A API REST da Google exige "inlineData" com "mimeType" e "data" (camelCase)
       parts.push({
-        inline_data: {
-          mime_type: mimeType,
+        inlineData: {
+          mimeType: mimeType,
           data: base64Data,
         }
       });
@@ -299,11 +373,13 @@ export class AiDispatchExtractorService {
 
     const payload = {
       contents: [{ role: 'user', parts }],
-      generationConfig: { response_mime_type: 'application/json', temperature: 0.1 }
+      generationConfig: {
+        responseMimeType: 'application/json',
+      }
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     try {
       const response = await fetch(endpoint, {
