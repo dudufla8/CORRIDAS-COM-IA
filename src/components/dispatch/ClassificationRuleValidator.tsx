@@ -8,18 +8,28 @@ interface ClassificationRuleValidatorProps {
   resultado: ResultadoRuleEngine;
   valoresManuais: Record<string, string>;
   onAlterarValor: (campo: string, valor: string) => void;
+  totalPendenciasBloqueantes?: number;
+  pendenciasGerais?: string[];
 }
 
 export const ClassificationRuleValidator: React.FC<ClassificationRuleValidatorProps> = ({
   resultado,
   valoresManuais,
   onAlterarValor,
+  totalPendenciasBloqueantes,
+  pendenciasGerais,
 }) => {
   const camposVisiveis = resultado.detalhesCampos.filter(
     (c) => c.nomeExibicao !== `Classificador ${c.numeroCampo}` || c.valor !== ''
   );
 
-  const pendencias = resultado.camposPendentesObrigatorios.length;
+  const pendencias = totalPendenciasBloqueantes !== undefined
+    ? totalPendenciasBloqueantes
+    : resultado.camposPendentesObrigatorios.length;
+
+  const tudoLiberado = totalPendenciasBloqueantes !== undefined
+    ? totalPendenciasBloqueantes === 0
+    : resultado.podeDespachar;
 
   return (
     <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4">
@@ -36,15 +46,15 @@ export const ClassificationRuleValidator: React.FC<ClassificationRuleValidatorPr
         </div>
 
         <div>
-          {resultado.podeDespachar ? (
+          {tudoLiberado ? (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              Regras Validadas
+              Requisitos Validados
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
               <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-              {pendencias} {pendencias === 1 ? 'campo obrigatório pendente' : 'campos obrigatórios pendentes'}
+              {pendencias} {pendencias === 1 ? 'campo pendente' : 'campos pendentes'}
             </span>
           )}
         </div>

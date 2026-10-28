@@ -253,16 +253,18 @@ export const MiniMapaRota: React.FC<MiniMapaRotaProps> = ({
 
       {/* Overlay se ainda não houver pontos identificados */}
       {!temPontos && (
-        <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-[1px] flex flex-col items-center justify-center p-4 text-center pointer-events-none z-5">
-          <div className="w-8 h-8 rounded-full bg-white/90 text-blue-600 flex items-center justify-center shadow-xs mb-1.5">
-            <MapPin className="w-4 h-4" />
+        <div className="absolute inset-0 bg-slate-900/15 backdrop-blur-[1.5px] flex items-center justify-center p-3 pointer-events-none z-5">
+          <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-xl border border-slate-200/90 shadow-sm max-w-[280px] text-center flex flex-col items-center mt-5">
+            <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shadow-2xs mb-2">
+              <MapPin className="w-4 h-4" />
+            </div>
+            <div className="text-xs font-bold text-slate-800 leading-snug">
+              Aguardando origem e destino
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+              O trajeto da corrida será plotado em tempo real no mapa assim que os endereços forem extraídos pela IA.
+            </p>
           </div>
-          <span className="text-xs font-semibold text-slate-800">
-            Aguardando origem e destino
-          </span>
-          <p className="text-[10px] text-slate-600 max-w-xs mt-0.5">
-            O trajeto da corrida será plotado em tempo real no mapa assim que os endereços forem extraídos pela IA.
-          </p>
         </div>
       )}
     </div>

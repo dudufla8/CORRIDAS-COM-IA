@@ -33,8 +33,10 @@ import {
   Calendar,
   Radio,
   LogOut,
+  AlertTriangle,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import { toast } from 'sonner';
 import { RideExtractionData } from '../../lib/ai/schema';
 import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } from '../../lib/rules/classifier-engine';
 import { TaxiDigitalApiClient } from '../../lib/taxi-digital/client';
@@ -42,6 +44,30 @@ import { ClassificationRuleValidator } from './ClassificationRuleValidator';
 import { PainelStatusAoVivo } from './PainelStatusAoVivo';
 import { ModalLoginDespachante } from '../auth/ModalLoginDespachante';
 import { DespachanteUsuario, DESPACHANTES_PREDEFINIDOS } from '@/lib/auth/despachantes';
+
+export function formatarTelefoneBR(telefone?: string | null): string {
+  if (!telefone) return '';
+  let apenasDigitos = telefone.replace(/\D/g, '');
+  if (apenasDigitos.startsWith('55') && (apenasDigitos.length === 12 || apenasDigitos.length === 13)) {
+    apenasDigitos = apenasDigitos.slice(2);
+  }
+  if (apenasDigitos.length > 11) {
+    apenasDigitos = apenasDigitos.slice(0, 11);
+  }
+
+  if (apenasDigitos.length === 11) {
+    return `(${apenasDigitos.slice(0, 2)}) ${apenasDigitos.slice(2, 7)}-${apenasDigitos.slice(7)}`;
+  } else if (apenasDigitos.length === 10) {
+    return `(${apenasDigitos.slice(0, 2)}) ${apenasDigitos.slice(2, 6)}-${apenasDigitos.slice(6)}`;
+  } else if (apenasDigitos.length > 6) {
+    return `(${apenasDigitos.slice(0, 2)}) ${apenasDigitos.slice(2, 6)}-${apenasDigitos.slice(6)}`;
+  } else if (apenasDigitos.length > 2) {
+    return `(${apenasDigitos.slice(0, 2)}) ${apenasDigitos.slice(2)}`;
+  } else if (apenasDigitos.length > 0) {
+    return `(${apenasDigitos}`;
+  }
+  return '';
+}
 
 export interface AgendamentoLog {
   id: string;
@@ -453,7 +479,7 @@ export const AiDispatchHub: React.FC = () => {
 
   const exportarLogCsv = () => {
     if (historicoLogs.length === 0) {
-      alert('Nenhum agendamento registrado no histórico para exportar.');
+      toast.warning('Nenhum agendamento registrado no histórico para exportar.');
       return;
     }
     const headers = [
@@ -528,9 +554,35 @@ export const AiDispatchHub: React.FC = () => {
     }
   );
 
+  // Lista de pendências gerais fundamentais para o agendamento
+  const pendenciasBloqueantes: string[] = [];
+  if (!formPassageiro.nome?.trim()) {
+    pendenciasBloqueantes.push('Nome do Passageiro');
+  }
+  if (!formOrigem?.trim()) {
+    pendenciasBloqueantes.push('Origem (Embarque)');
+  }
+  if (!formDestino?.trim()) {
+    pendenciasBloqueantes.push('Destino (Desembarque)');
+  }
+  if (!formViagem.data?.trim()) {
+    pendenciasBloqueantes.push('Data da Corrida');
+  }
+  if (!formViagem.hora?.trim()) {
+    pendenciasBloqueantes.push('Horário do Embarque');
+  }
+
+  // Pendências de classificadores exigidos pelo contrato ativo
+  const pendenciasContrato = resultadoRules.camposPendentesObrigatorios.map((c) => c.nomeExibicao);
+  
+  const todasPendencias = [...pendenciasBloqueantes, ...pendenciasContrato];
+  const totalPendencias = todasPendencias.length;
+  const podeDespacharTotal = totalPendencias === 0;
+
   const handleCopiarVoucher = (codigo: string) => {
     navigator.clipboard.writeText(codigo);
     setCopiadoVoucher(true);
+    toast.success('Voucher copiado para a área de transferência!');
     setTimeout(() => setCopiadoVoucher(false), 2500);
   };
 
@@ -554,6 +606,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
 
     navigator.clipboard.writeText(texto);
     setCopiadoTextoCompleto(true);
+    toast.success('Confirmação da corrida copiada para a área de transferência!');
     setTimeout(() => setCopiadoTextoCompleto(false), 2500);
   };
 
@@ -597,7 +650,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
   const handlePasteFromClipboard = async () => {
     try {
       if (!navigator.clipboard) {
-        alert('Seu navegador não suporta leitura direta da área de transferência.');
+        toast.warning('Seu navegador não suporta leitura direta da área de transferência.');
         return;
       }
 
@@ -628,11 +681,11 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
         setTextInput(text);
         processarExtracaoTextoComConteudo(text);
       } else {
-        alert('Nenhuma imagem ou texto encontrado na área de transferência.');
+        toast.info('Nenhuma imagem ou texto encontrado na área de transferência.');
       }
     } catch (err) {
       console.warn('Permissão de clipboard negada ou falha ao ler:', err);
-      alert('Dê permissão para colar ou use o comando de colar diretamente no campo.');
+      toast.warning('Dê permissão para colar ou use o comando de colar diretamente no campo.');
     }
   };
 
@@ -664,14 +717,14 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 'Enter') {
         e.preventDefault();
-        if (resultadoRules.podeDespachar && !despachando) {
+        if (podeDespacharTotal && !despachando) {
           handleDespacharCorrida();
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [resultadoRules.podeDespachar, despachando]);
+  }, [podeDespacharTotal, despachando]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -747,9 +800,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     } catch (err: any) {
       console.error('Erro na extração de imagem:', err);
       if (err.name === 'AbortError') {
-        alert('Tempo limite excedido ao processar print com IA. O sistema usará os dados inseridos ou você pode tentar novamente.');
+        toast.error('Tempo limite excedido ao processar print com IA. Tente novamente.');
       } else {
-        alert('Aviso da IA: ' + (err.message || 'Falha ao processar print.'));
+        toast.error('Aviso da IA: ' + (err.message || 'Falha ao processar print.'));
       }
     } finally {
       clearTimeout(timeoutId);
@@ -786,9 +839,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     } catch (err: any) {
       console.error('Erro na extração de texto:', err);
       if (err.name === 'AbortError') {
-        alert('Tempo limite excedido ao processar texto.');
+        toast.error('Tempo limite excedido ao processar texto.');
       } else {
-        alert('Aviso da IA: ' + (err.message || 'Falha ao processar texto.'));
+        toast.error('Aviso da IA: ' + (err.message || 'Falha ao processar texto.'));
       }
     } finally {
       clearTimeout(timeoutId);
@@ -802,9 +855,13 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
 
   const aplicarDadosExtraidos = (dados: RideExtractionData) => {
     setExtractedData(dados);
+
+    // Formatação e normalização do telefone retirando prefixo +55 e aplicando máscara (XX) XXXXX-XXXX
+    const telefoneFormatado = formatarTelefoneBR(dados.passageiro?.telefone);
+
     setFormPassageiro({
       nome: dados.passageiro.nome,
-      telefone: dados.passageiro.telefone || '',
+      telefone: telefoneFormatado,
       identificador: dados.passageiro.identificador || '',
     });
     setFormViagem({
@@ -820,7 +877,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     let contratoFinalId = contratoSelecionadoId;
 
     if (!contratoModoManualRef.current) {
-      const textoBusca = `${dados.empresaIdentificada || ''} ${dados.classificadores?.codigoOsChamado || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''} ${dados.observacoesOperacionais || ''} ${dados.classificadores?.centroCusto || ''}`.toLowerCase();
+      const textoBusca = `${dados.empresaIdentificada || ''} ${dados.empresaSolicitante || ''} ${dados.classificadores?.codigoOsChamado || ''} ${dados.classificadores?.voucherVoll || ''} ${dados.origem?.enderecoCompleto || ''} ${dados.destino?.enderecoCompleto || ''} ${dados.observacoesOperacionais || ''} ${dados.classificadores?.centroCusto || ''}`.toLowerCase();
       const hasVollCode = /#?unipar-m/i.test(textoBusca);
 
       let contratoDetectado: ContratoCorporativo | undefined;
@@ -832,7 +889,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
         textoBusca.includes('unipar direto') ||
         textoBusca.includes('@unipar.com') ||
         textoBusca.includes('solange') ||
-        textoBusca.includes('unipar')
+        textoBusca.includes('camacari') ||
+        textoBusca.includes('camaçari') ||
+        (textoBusca.includes('unipar') && !textoBusca.includes('voll'))
       ) {
         contratoDetectado = CONTRATOS_DISPONIVEIS.find((c) => c.id === 'unipar-direto');
       } else if (/#claro/i.test(textoBusca) || textoBusca.includes('claro') || textoBusca.includes('embratel')) {
@@ -855,32 +914,77 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     }
 
     // Pré-preenchimento automático dos classificadores adaptado ao contrato
-    adaptarClassificadoresParaContrato(contratoFinalId, dados, dados.passageiro?.nome);
+    adaptarClassificadoresParaContrato(contratoFinalId, dados, dados.passageiro?.nome, telefoneFormatado);
 
     consultarAutorizado(dados.passageiro.identificador || dados.passageiro.nome);
-    calcularEstimativaRota(
-      dados.origem.enderecoCompleto,
-      dados.destino?.enderecoCompleto,
-      contratoFinalId,
-      dados.agendamento.dataAgendamento,
-      dados.agendamento.horaAgendamento
-    );
+
+    // Dispara a estimativa automática de rota assim que origem e destino forem preenchidos pela IA
+    if (dados.origem?.enderecoCompleto && dados.destino?.enderecoCompleto) {
+      calcularEstimativaRota(
+        dados.origem.enderecoCompleto,
+        dados.destino.enderecoCompleto,
+        contratoFinalId,
+        dados.agendamento.dataAgendamento,
+        dados.agendamento.horaAgendamento
+      );
+    } else if (dados.origem?.enderecoCompleto) {
+      calcularEstimativaRota(
+        dados.origem.enderecoCompleto,
+        undefined,
+        contratoFinalId,
+        dados.agendamento.dataAgendamento,
+        dados.agendamento.horaAgendamento
+      );
+    }
+
+    // Sistema de Notificações via Toast elegante
+    if (dados.alertas && dados.alertas.length > 0) {
+      toast.warning('Dados extraídos pela IA com alertas de conferência', {
+        description: `IA identificou ${dados.alertas.length} alerta(s). Verifique o topo do formulário.`,
+      });
+    } else {
+      toast.success('Dados da corrida extraídos com sucesso pela IA!');
+    }
   };
 
   const adaptarClassificadoresParaContrato = (
     contratoId: string,
     dadosAtuais?: RideExtractionData | null,
-    passageiroNome?: string
+    passageiroNome?: string,
+    telefoneFormatado?: string
   ) => {
     const dados = dadosAtuais !== undefined ? dadosAtuais : extractedData;
     const nome = passageiroNome || formPassageiro.nome;
+    const tel = telefoneFormatado || formPassageiro.telefone;
     const novos: Record<string, string> = {};
 
     if (nome) {
       novos['nomeSolicitante'] = nome;
     }
 
-    if (contratoId === 'unipar-direto') {
+    const codigoAgendamento = dados?.classificadores?.voucherVoll || dados?.classificadores?.codigoOsChamado || '';
+
+    if (contratoId === 'voll-geral') {
+      if (codigoAgendamento) {
+        // Regra 1: Mapear o código do agendamento diretamente para o classificador obrigatório "Voucher Voll" (campo 1)
+        novos['classificador1'] = codigoAgendamento;
+      }
+      const textoEmpresa = `${codigoAgendamento} ${dados?.empresaIdentificada || ''} ${dados?.empresaSolicitante || ''}`.toUpperCase();
+      if (textoEmpresa.includes('ITAU') || textoEmpresa.includes('ITAÚ')) {
+        novos['classificador2'] = 'ITAU';
+        novos['classificador3'] = 'itau-0002';
+      } else if (textoEmpresa.includes('HNK') || textoEmpresa.includes('HEINEKEN')) {
+        novos['classificador2'] = 'HEINEKEN';
+        novos['classificador3'] = 'voll-004';
+      } else if (dados?.classificadores?.centroCusto) {
+        novos['classificador2'] = dados.classificadores.centroCusto;
+      }
+    } else if (contratoId === 'claro-voll') {
+      if (codigoAgendamento) {
+        novos['classificador1'] = codigoAgendamento;
+      }
+      novos['classificador2'] = 'TÁXI 2.0';
+    } else if (contratoId === 'unipar-direto') {
       novos['classificador1'] = 'UNIPAR CARBOCLORO';
       novos['classificador2'] = dados?.classificadores?.centroCusto || '10300020';
       if (dados?.classificadores?.solicitante) {
@@ -890,31 +994,18 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
         novos['classificador6'] = dados.observacoesOperacionais;
       }
     } else if (contratoId === 'unipar-voll') {
-      if (dados?.classificadores?.codigoOsChamado) {
-        novos['classificador1'] = dados.classificadores.codigoOsChamado;
+      if (codigoAgendamento) {
+        novos['classificador1'] = codigoAgendamento;
       }
-      if (formPassageiro.telefone) {
-        novos['classificador2'] = formPassageiro.telefone;
+      if (tel) {
+        novos['classificador2'] = tel;
       }
       if (dados?.classificadores?.centroCusto) {
         novos['classificador3'] = dados.classificadores.centroCusto;
       }
-    } else if (contratoId === 'claro-voll') {
-      if (dados?.classificadores?.codigoOsChamado) {
-        novos['classificador1'] = dados.classificadores.codigoOsChamado;
-      }
-      novos['classificador2'] = 'TÁXI 2.0';
-    } else if (contratoId === 'heineken-voll') {
-      if (dados?.classificadores?.codigoOsChamado) {
-        novos['classificador1'] = dados.classificadores.codigoOsChamado;
-      }
-      novos['classificador2'] = '0001 - UN ITU / CORPORATIVO';
-      if (formPassageiro.telefone) {
-        novos['classificador3'] = formPassageiro.telefone;
-      }
     } else {
-      if (dados?.classificadores?.codigoOsChamado) {
-        novos['classificador1'] = dados.classificadores.codigoOsChamado;
+      if (codigoAgendamento) {
+        novos['classificador1'] = codigoAgendamento;
       }
       if (dados?.classificadores?.centroCusto) {
         novos['classificador2'] = dados.classificadores.centroCusto;
@@ -1026,8 +1117,8 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
   };
 
   const handleDespacharCorrida = async () => {
-    if (!resultadoRules.podeDespachar) {
-      alert('Atenção: Existem regras contratuais obrigatórias pendentes.');
+    if (!podeDespacharTotal) {
+      toast.warning(`Atenção: Existem pendências obrigatórias (${totalPendencias}): ${todasPendencias.join(', ')}.`);
       return;
     }
 
@@ -1078,6 +1169,10 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       };
       setResultadoDespacho(detalhesSucesso);
 
+      toast.success('Corrida agendada com sucesso na central Táxi Digital!', {
+        description: `Booking ID: ${detalhesSucesso.bookingId} • Voucher: ${detalhesSucesso.voucher}`,
+      });
+
       // REGISTRO DE AUDITORIA & LOG ("QUEM FEZ")
       const novoLogItem: AgendamentoLog = {
         id: `LOG-${Date.now()}`,
@@ -1116,11 +1211,19 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       }).catch(() => {});
     } catch (err: any) {
       console.error('Falha no despacho:', err);
-      alert('Aviso da Central Táxi Digital: ' + (err.message || 'Falha ao agendar corrida.'));
+      toast.error('Aviso da Central Táxi Digital: ' + (err.message || 'Falha ao agendar corrida.'));
     } finally {
       setDespachando(false);
     }
   };
+
+  const isAiPassageiroNome = Boolean(extractedData?.passageiro?.nome && formPassageiro.nome === extractedData.passageiro.nome);
+  const isAiPassageiroTel = Boolean(extractedData?.passageiro?.telefone && formPassageiro.telefone);
+  const isAiOrigem = Boolean(extractedData?.origem?.enderecoCompleto && formOrigem === extractedData.origem.enderecoCompleto);
+  const isAiDestino = Boolean(extractedData?.destino?.enderecoCompleto && formDestino === extractedData.destino.enderecoCompleto);
+  const isAiData = Boolean(extractedData?.agendamento?.dataAgendamento && formViagem.data === extractedData.agendamento.dataAgendamento);
+  const isAiHora = Boolean(extractedData?.agendamento?.horaAgendamento && formViagem.hora === extractedData.agendamento.horaAgendamento);
+  const isAiObs = Boolean(extractedData?.observacoesOperacionais && formObservacoes === extractedData.observacoesOperacionais);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased">
@@ -1424,7 +1527,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
 ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}\n` : ''}👤 *Operador Responsável:* ${log.operador}
 ✅ *Status:* Agendado com sucesso na central Táxi Digital.`;
                             navigator.clipboard.writeText(texto);
-                            alert('Comprovante formatado copiado para a área de transferência!');
+                            toast.success('Comprovante formatado copiado para a área de transferência!');
                           }}
                           className="px-2.5 py-1 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md flex items-center gap-1 cursor-pointer transition-colors"
                         >
@@ -2085,6 +2188,24 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
                 )}
               </div>
 
+              {/* BANNER DE ALERTAS OPERACIONAIS DA IA */}
+              {extractedData?.alertas && extractedData.alertas.length > 0 && (
+                <div className="p-3.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-2 shadow-2xs">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Alertas Identificados na Conferência da IA ({extractedData.alertas.length})</span>
+                  </div>
+                  <ul className="text-xs text-amber-900 space-y-1 pl-5 list-disc">
+                    {extractedData.alertas.map((alerta, idx) => (
+                      <li key={idx} className="leading-snug">{alerta}</li>
+                    ))}
+                  </ul>
+                  <p className="text-[11px] text-amber-800/80 pt-1 border-t border-amber-200">
+                    Os dados foram pré-preenchidos no formulário abaixo. Por favor, confira as informações antes de despachar.
+                  </p>
+                </div>
+              )}
+
               {/* LINHA 1: Contrato Corporativo (dropdown) + Tipo de Chamada + Data e Horário em grade horizontal única */}
               <div className="p-3 rounded-lg bg-slate-50/80 border border-slate-200/90">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-2.5">
@@ -2156,23 +2277,37 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
 
                   {/* Data (2 colunas) */}
                   <div className="md:col-span-2 space-y-1">
-                    <label className="text-[11px] font-semibold text-slate-700 block">Data</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-slate-700 block">Data</label>
+                      {isAiData && (
+                        <span className="text-[8px] font-medium bg-blue-50 text-blue-700 border border-blue-200 px-1 rounded">IA</span>
+                      )}
+                    </div>
                     <input
                       type="date"
                       value={formViagem.data}
                       onChange={(e) => setFormViagem({ ...formViagem, data: e.target.value })}
-                      className="w-full h-8 px-1.5 text-xs rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none"
+                      className={`w-full h-8 px-1.5 text-xs rounded-md border text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none transition-colors ${
+                        isAiData ? 'border-blue-400 bg-blue-50/15' : 'border-slate-300 bg-white'
+                      }`}
                     />
                   </div>
 
                   {/* Horário (2 colunas) */}
                   <div className="md:col-span-2 space-y-1">
-                    <label className="text-[11px] font-semibold text-slate-700 block">Horário</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-slate-700 block">Horário</label>
+                      {isAiHora && (
+                        <span className="text-[8px] font-medium bg-blue-50 text-blue-700 border border-blue-200 px-1 rounded">IA</span>
+                      )}
+                    </div>
                     <input
                       type="time"
                       value={formViagem.hora}
                       onChange={(e) => setFormViagem({ ...formViagem, hora: e.target.value })}
-                      className="w-full h-8 px-1.5 text-xs rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none"
+                      className={`w-full h-8 px-1.5 text-xs rounded-md border text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none transition-colors ${
+                        isAiHora ? 'border-blue-400 bg-blue-50/15' : 'border-slate-300 bg-white'
+                      }`}
                     />
                   </div>
                 </div>
@@ -2181,10 +2316,17 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
               {/* LINHA 2: Nome Completo do Passageiro + Telefone / WhatsApp lado a lado (50% / 50%) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Nome Completo do Passageiro</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Nome Completo do Passageiro</span>
+                    </label>
+                    {isAiPassageiroNome && (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded">
+                        <Sparkles className="w-2.5 h-2.5" /> Extraído por IA
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={formPassageiro.nome}
@@ -2192,22 +2334,37 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
                     onChange={(e) => {
                       const val = e.target.value;
                       setFormPassageiro((prev) => ({ ...prev, nome: val }));
+                      // Sincroniza imediatamente com Nome (Solicitante / Passageiro)
                       setValoresManuais((prev) => ({ ...prev, nomeSolicitante: val }));
                     }}
-                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900"
+                    className={`w-full h-9 px-3 text-xs rounded-md border focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 transition-colors ${
+                      isAiPassageiroNome ? 'border-blue-400 bg-blue-50/15' : 'border-slate-300 bg-white'
+                    }`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                    <span>Telefone / WhatsApp</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <span>Telefone / WhatsApp</span>
+                    </label>
+                    {isAiPassageiroTel && (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded">
+                        <Sparkles className="w-2.5 h-2.5" /> Extraído por IA
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={formPassageiro.telefone}
                     placeholder="(00) 00000-0000"
-                    onChange={(e) => setFormPassageiro((prev) => ({ ...prev, telefone: e.target.value }))}
-                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900"
+                    onChange={(e) => {
+                      const formatado = formatarTelefoneBR(e.target.value);
+                      setFormPassageiro((prev) => ({ ...prev, telefone: formatado }));
+                    }}
+                    className={`w-full h-9 px-3 text-xs rounded-md border focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 transition-colors ${
+                      isAiPassageiroTel ? 'border-blue-400 bg-blue-50/15' : 'border-slate-300 bg-white'
+                    }`}
                   />
                 </div>
               </div>
@@ -2215,32 +2372,62 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
               {/* LINHA 3: Origem (Embarque) e Destino (Desembarque) em linha dupla compacta */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100 shrink-0"></span>
-                    <span>Origem (Embarque)</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100 shrink-0"></span>
+                      <span>Origem (Embarque)</span>
+                    </label>
+                    {isAiOrigem && (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded">
+                        <Sparkles className="w-2.5 h-2.5" /> Extraído por IA
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={formOrigem}
                     placeholder="Endereço de partida..."
-                    onChange={(e) => setFormOrigem(e.target.value)}
+                    onChange={(e) => {
+                      const novaOrigem = e.target.value;
+                      setFormOrigem(novaOrigem);
+                      if (novaOrigem && formDestino) {
+                        calcularEstimativaRota(novaOrigem, formDestino);
+                      }
+                    }}
                     onBlur={() => calcularEstimativaRota()}
-                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal"
+                    className={`w-full h-9 px-3 text-xs rounded-md border focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal transition-colors ${
+                      isAiOrigem ? 'border-blue-400 bg-blue-50/15' : 'border-slate-300 bg-white'
+                    }`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-slate-900 ring-2 ring-slate-100 shrink-0"></span>
-                    <span>Destino (Desembarque)</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-slate-900 ring-2 ring-slate-100 shrink-0"></span>
+                      <span>Destino (Desembarque)</span>
+                    </label>
+                    {isAiDestino && (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded">
+                        <Sparkles className="w-2.5 h-2.5" /> Extraído por IA
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={formDestino}
-                    placeholder="Endereço de destino..."
-                    onChange={(e) => setFormDestino(e.target.value)}
+                    placeholder="Endereço de destino ou local nomeado..."
+                    onChange={(e) => {
+                      const novoDestino = e.target.value;
+                      setFormDestino(novoDestino);
+                      if (formOrigem && novoDestino) {
+                        calcularEstimativaRota(formOrigem, novoDestino);
+                      }
+                    }}
                     onBlur={() => calcularEstimativaRota()}
-                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal"
+                    className={`w-full h-9 px-3 text-xs rounded-md border focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal transition-colors ${
+                      isAiDestino ? 'border-blue-400 bg-blue-50/15' : 'border-slate-300 bg-white'
+                    }`}
                   />
                 </div>
               </div>
@@ -2250,45 +2437,56 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
                 resultado={resultadoRules}
                 valoresManuais={valoresManuais}
                 onAlterarValor={handleAlterarValorClassificador}
+                totalPendenciasBloqueantes={totalPendencias}
+                pendenciasGerais={todasPendencias}
               />
 
               {/* LINHA 5: Observações para a Frota em campo horizontal de altura reduzida */}
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Observações para a Frota</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Observações para a Frota</span>
+                  </label>
+                  {isAiObs && (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded">
+                      <Sparkles className="w-2.5 h-2.5" /> Extraído por IA
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={formObservacoes}
                   placeholder="Informações adicionais para o motorista (ex: portão de entrada, ferramentas, voo)..."
                   onChange={(e) => setFormObservacoes(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal"
+                  className={`w-full h-9 px-3 text-xs rounded-md border focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal transition-colors ${
+                    isAiObs ? 'border-blue-400 bg-blue-50/15' : 'border-slate-300 bg-white'
+                  }`}
                 />
               </div>
 
               {/* BOTÃO DE AÇÃO PRIMÁRIA FIXO NA BASE COM VISUAL DOMINANTE E SUPORTE A CTRL + ENTER */}
               <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs py-3 px-4 -mx-4 -mb-4 sm:-mx-5 sm:-mb-5 rounded-b-xl border-t border-slate-200 z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
                 <div className="text-xs text-slate-600 flex-1 min-w-0">
-                  {!resultadoRules.podeDespachar ? (
+                  {!podeDespacharTotal ? (
                     <span className="text-amber-800 font-medium flex items-center gap-1.5 leading-snug">
                       <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                      Preencha os campos obrigatórios acima para liberar o envio.
+                      {totalPendencias} {totalPendencias === 1 ? 'campo pendente' : 'campos pendentes'} para envio: {todasPendencias.join(', ')}.
                     </span>
                   ) : (
                     <span className="text-emerald-700 font-medium flex items-center gap-1.5 leading-snug">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                      Requisitos validados! Pressione <kbd className="bg-slate-100 text-slate-800 border border-slate-300 rounded px-1.5 py-0.5 text-[10px] font-mono font-bold shadow-2xs ml-1">Ctrl + Enter</kbd>
+                      Todos os requisitos validados! Pressione <kbd className="bg-slate-100 text-slate-800 border border-slate-300 rounded px-1.5 py-0.5 text-[10px] font-mono font-bold shadow-2xs ml-1">Ctrl + Enter</kbd>
                     </span>
                   )}
                 </div>
 
                 <button
                   type="button"
-                  disabled={!resultadoRules.podeDespachar || despachando}
+                  disabled={!podeDespacharTotal || despachando}
                   onClick={handleDespacharCorrida}
                   className={`h-11 px-6 rounded-lg font-bold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 shrink-0 whitespace-nowrap shadow-sm ${
-                    resultadoRules.podeDespachar
+                    podeDespacharTotal
                       ? 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white cursor-pointer hover:shadow'
                       : 'opacity-50 cursor-not-allowed bg-slate-200 text-slate-500'
                   }`}

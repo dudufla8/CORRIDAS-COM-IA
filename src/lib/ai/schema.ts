@@ -28,8 +28,9 @@ export const ViagemAgendamentoSchema = z.object({
 });
 
 export const ClassificadoresDetectadosSchema = z.object({
-  codigoOsChamado: z.string().optional().describe('Ex: #UNIPAR-M2026, OS-88421'),
-  centroCusto: z.string().optional().describe('Ex: CC Manutenção 2026, 1020-OPER'),
+  codigoOsChamado: z.string().optional().describe('Ex: #UNIPAR-M2026, #ITAU-M18252317, OS-88421'),
+  voucherVoll: z.string().optional().describe('Código exato do agendamento Voll ex: #ITAU-M18252317'),
+  centroCusto: z.string().optional().describe('Ex: CC Manutenção 2026, UD.AFE-260006.005.02 / UNIPAR CARBOCLORO CAMACARI, 10300020'),
   projeto: z.string().optional(),
   motivoViagem: z.string().optional(),
   solicitante: z.string().optional(),
@@ -38,6 +39,8 @@ export const ClassificadoresDetectadosSchema = z.object({
 
 export const RideExtractionSchema = z.object({
   empresaIdentificada: z.string().optional(),
+  empresaSolicitante: z.string().optional().describe('Razão social ou nome da empresa solicitante (ex: ITAU UNIBANCO S/A, UNIPAR)'),
+  valorPrevisto: z.number().nullable().optional().describe('Valor previsto ou estimado da corrida no print'),
   canalOrigem: z.enum(['PRINT_OCR', 'TEXTO_LIVRE', 'EMAIL_PARSER', 'PDF_DOCUMENT']).default('PRINT_OCR'),
   passageiro: PassageiroSchema,
   agendamento: ViagemAgendamentoSchema,
@@ -46,7 +49,8 @@ export const RideExtractionSchema = z.object({
   classificadores: ClassificadoresDetectadosSchema,
   observacoesOperacionais: z.string().optional(),
   scoreConfianca: z.number().min(0).max(1),
-  avisosOuInconsistencias: z.array(z.string()),
+  alertas: z.array(z.string()).default([]),
+  avisosOuInconsistencias: z.array(z.string()).default([]),
 });
 
 export type RideExtractionData = z.infer<typeof RideExtractionSchema>;
@@ -54,3 +58,4 @@ export type EnderecoData = z.infer<typeof EnderecoSchema>;
 export type PassageiroData = z.infer<typeof PassageiroSchema>;
 export type ViagemAgendamentoData = z.infer<typeof ViagemAgendamentoSchema>;
 export type ClassificadoresDetectadosData = z.infer<typeof ClassificadoresDetectadosSchema>;
+
