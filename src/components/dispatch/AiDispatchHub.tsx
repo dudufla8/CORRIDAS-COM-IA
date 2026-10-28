@@ -733,13 +733,13 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     }
   };
 
-  // Otimização e compressão de print para envio ultra-rápido à IA (reduz de 5MB para ~150KB)
-  const otimizarPrintBase64 = (base64: string, maxDim = 1400): Promise<string> => {
+  // Otimização e compressão de print para envio ultra-rápido à IA (reduz de 5MB para ~80KB)
+  const otimizarPrintBase64 = (base64: string, maxDim = 1000): Promise<string> => {
     return new Promise((resolve) => {
       const img = new window.Image();
       img.onload = () => {
         let { width, height } = img;
-        if (width <= maxDim && height <= maxDim && base64.length < 400000) {
+        if (width <= maxDim && height <= maxDim && base64.length < 250000) {
           resolve(base64);
           return;
         }
@@ -763,7 +763,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.88));
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
       };
       img.onerror = () => resolve(base64);
       img.src = base64;
@@ -775,7 +775,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     setResultadoDespacho(null);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 40000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     try {
       const base64Otimizado = await otimizarPrintBase64(base64);
@@ -791,6 +791,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       });
 
       if (!response.ok) {
+        if (response.status === 504) {
+          throw new Error('Tempo limite excedido na nuvem (504). O print foi reotimizado para processamento ultra-rápido. Tente clicar em "Processar com IA" novamente.');
+        }
         const errorJson = await response.json().catch(() => ({}));
         throw new Error(errorJson.error || `Erro HTTP ${response.status}`);
       }

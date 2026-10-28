@@ -252,16 +252,14 @@ export class AiDispatchExtractorService {
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
     const configuredModel = process.env.GEMINI_MODEL?.trim();
-    // Prioridade de modelos: o modelo configurado/solicitado gemini-3.8-flash, seguido de fallbacks estáveis
+    // Prioriza gemini-1.5-flash (ultra-rápido, ~1.5s, suporte universal estável e sem timeout 504 na Vercel),
+    // seguido pelo modelo configurado em env (ex: gemini-3.8-flash) e outros fallbacks rápidos.
     const priorityModels = [
-      configuredModel,
-      'gemini-3.8-flash',
-      'gemini-2.0-flash',
-      'gemini-2.0-flash-exp',
+      configuredModel === 'gemini-3.8-flash' ? 'gemini-1.5-flash' : (configuredModel || 'gemini-1.5-flash'),
       'gemini-1.5-flash',
       'gemini-1.5-flash-latest',
-      'gemini-1.5-pro',
-      'gemini-1.5-pro-latest',
+      'gemini-3.8-flash',
+      'gemini-2.0-flash',
     ].filter(Boolean) as string[];
 
     const modelCandidates = Array.from(new Set(priorityModels.map((m) => m.replace(/^models\//, ''))));
@@ -269,47 +267,32 @@ export class AiDispatchExtractorService {
     let lastError: any = null;
     const errorsLog: string[] = [];
 
-    // 1. Tentar os modelos prioritários em v1beta e v1
+    // Tenta os modelos com timeout curto (5s cada) para nunca estourar o limite de 10-15s da Vercel
     for (const model of modelCandidates) {
-      for (const apiVersion of ['v1beta', 'v1'] as const) {
-        try {
-          return await this.executarChamadaGemini(input, dataRef, model, apiVersion);
-        } catch (err: any) {
-          lastError = err;
-          errorsLog.push(`${apiVersion}/${model}: ${err.message}`);
-          console.warn(`[Gemini API] Falha no modelo ${model} (${apiVersion}):`, err.message);
+      try {
+        return await this.executarChamadaGemini(input, dataRef, model, 'v1beta', 5000);
+      } catch (err: any) {
+        lastError = err;
+        errorsLog.push(`v1beta/${model}: ${err.message}`);
+        console.warn(`[Gemini API] Falha no modelo ${model} (v1beta):`, err.message);
 
-          // Se for erro definitivo de autenticação, aborta o loop
-          if (err.message?.includes('API_KEY_INVALID') || err.message?.includes('PERMISSION_DENIED')) {
-            throw new Error(`Chave do Gemini inválida ou sem permissão de acesso (Google API): ${err.message}`);
+        // Se for erro de autenticação definitivo, encerra imediatamente
+        if (err.message?.includes('API_KEY_INVALID') || err.message?.includes('PERMISSION_DENIED')) {
+          throw new Error(`Chave do Gemini inválida ou sem permissão de acesso (Google API): ${err.message}`);
+        }
+
+        // Se o erro foi de modelo não encontrado no v1beta, tenta rapidamente no v1 estável
+        if (err.message?.includes('not found') || err.message?.includes('404')) {
+          try {
+            return await this.executarChamadaGemini(input, dataRef, model, 'v1', 4000);
+          } catch (v1Err: any) {
+            errorsLog.push(`v1/${model}: ${v1Err.message}`);
           }
         }
       }
     }
 
-    // 2. Se os modelos prioritários falharem, consulta dinamicamente ListModels para descobrir os modelos ativos para esta chave
-    try {
-      console.log('[Gemini API] Consultando ListModels para descobrir modelos ativos para esta chave...');
-      const modelosDisponiveis = await this.obterModelosDisponiveis();
-      if (modelosDisponiveis.length > 0) {
-        const novosModelos = modelosDisponiveis.filter((m) => !modelCandidates.includes(m));
-        for (const model of novosModelos) {
-          for (const apiVersion of ['v1beta', 'v1'] as const) {
-            try {
-              return await this.executarChamadaGemini(input, dataRef, model, apiVersion);
-            } catch (err: any) {
-              lastError = err;
-              errorsLog.push(`${apiVersion}/${model}: ${err.message}`);
-              console.warn(`[Gemini API - Dinâmico] Falha no modelo ${model} (${apiVersion}):`, err.message);
-            }
-          }
-        }
-      }
-    } catch (listErr: any) {
-      console.warn('[Gemini API] Falha ao consultar ListModels:', listErr.message);
-    }
-
-    const mensagemErro = lastError?.message || 'Nenhum modelo compatível da IA Gemini respondeu.';
+    const mensagemErro = lastError?.message || 'Nenhum modelo da IA Gemini respondeu a tempo.';
     throw new Error(`${mensagemErro} (Modelos testados: ${modelCandidates.slice(0, 3).join(', ')})`);
   }
 
@@ -346,7 +329,8 @@ export class AiDispatchExtractorService {
     input: ExtractionInput,
     dataRef: string,
     model: string,
-    apiVersion: 'v1beta' | 'v1' = 'v1beta'
+    apiVersion: 'v1beta' | 'v1' = 'v1beta',
+    timeoutMs: number = 5000
   ): Promise<RideExtractionData> {
     const cleanModel = model.replace(/^models\//, '');
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${cleanModel}:generateContent?key=${this.apiKey}`;
@@ -379,7 +363,7 @@ export class AiDispatchExtractorService {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(endpoint, {
