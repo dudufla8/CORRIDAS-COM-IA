@@ -1,16 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-// Memória em runtime para instâncias ativas do Next.js + resposta JSON
-const LOGS_EM_MEMORIA: any[] = [];
+import { obterTodasCorridas, registrarNovaCorrida, atualizarStatusViaWebhook } from '@/lib/taxi-digital/store';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
+    const corridas = obterTodasCorridas();
     return NextResponse.json({
       status: true,
-      total: LOGS_EM_MEMORIA.length,
-      logs: LOGS_EM_MEMORIA.slice(0, 100),
+      total: corridas.length,
+      corridas,
+      // Compatibilidade retroativa com chave 'logs'
+      logs: corridas.map((c) => ({
+        id: c.id,
+        timestamp: c.criadoEm,
+        operador: c.operador,
+        bookingId: c.bookingId,
+        voucher: c.voucher,
+        status: c.status,
+        passageiroNome: c.passageiroNome,
+        passageiroTelefone: c.passageiroTelefone,
+        contratoId: c.contratoId,
+        contratoNome: c.contratoNome,
+        data: c.data,
+        hora: c.hora,
+        tipo: c.tipo,
+        origem: c.origem,
+        destino: c.destino,
+        categoriaNome: c.categoriaNome,
+        valorEstimado: c.valorEstimado,
+        valorFinal: c.valorFinal,
+        motoristaNome: c.motoristaNome,
+        veiculoPlaca: c.veiculoPlaca,
+        observacoes: c.observacoes,
+      })),
     });
   } catch (error: any) {
     return NextResponse.json({ status: false, error: error.message }, { status: 500 });
@@ -19,23 +42,53 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const logItem = await req.json();
-    if (!logItem || !logItem.bookingId) {
-      return NextResponse.json({ status: false, error: 'Dados do log inválidos' }, { status: 400 });
+    const body = await req.json();
+    if (!body || (!body.bookingId && !body.voucher)) {
+      return NextResponse.json({ status: false, error: 'Dados de corrida/log inválidos' }, { status: 400 });
     }
 
-    const itemCompleto = {
-      ...logItem,
-      id: logItem.id || `LOG-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      timestamp: logItem.timestamp || new Date().toISOString(),
-    };
-
-    LOGS_EM_MEMORIA.unshift(itemCompleto);
-    if (LOGS_EM_MEMORIA.length > 200) {
-      LOGS_EM_MEMORIA.pop();
+    // Se for uma requisição de simulação de atualização de status
+    if (body.simularWebhook) {
+      const atualizada = atualizarStatusViaWebhook({
+        bookingId: body.bookingId,
+        voucher: body.voucher,
+        statusRaw: body.status,
+        motoristaNome: body.motoristaNome,
+        motoristaTelefone: body.motoristaTelefone,
+        veiculoPlaca: body.veiculoPlaca,
+        veiculoModelo: body.veiculoModelo,
+        valorFinal: body.valorFinal,
+      });
+      return NextResponse.json({ status: true, corrida: atualizada });
     }
 
-    return NextResponse.json({ status: true, log: itemCompleto });
+    const novaCorrida = registrarNovaCorrida({
+      bookingId: String(body.bookingId || body.voucher || 'TD-AUTO'),
+      voucher: String(body.voucher || body.bookingId || 'VCH-AUTO'),
+      contratoId: body.contratoId || 'voll-geral',
+      contratoNome: body.contratoNome || 'VOLL (Corporativo Geral)',
+      passageiroNome: body.passageiroNome || 'Colaborador',
+      passageiroTelefone: body.passageiroTelefone || '',
+      data: body.data || new Date().toISOString().slice(0, 10),
+      hora: body.hora || '08:00',
+      tipo: body.tipo === 'IMEDIATO' ? 'IMEDIATO' : 'AGENDADO',
+      origem: body.origem || '',
+      destino: body.destino || '',
+      categoriaNome: body.categoriaNome || 'Táxi Convencional',
+      valorEstimado: body.valorEstimado ? Number(body.valorEstimado) : undefined,
+      valorFinal: body.valorFinal ? Number(body.valorFinal) : undefined,
+      status: body.status || (body.tipo === 'IMEDIATO' ? 'EM_ANDAMENTO' : 'AGENDADA'),
+      motoristaNome: body.motoristaNome,
+      motoristaTelefone: body.motoristaTelefone,
+      veiculoPlaca: body.veiculoPlaca,
+      veiculoModelo: body.veiculoModelo,
+      operador: body.operador || 'Operador Central',
+      operadorEmail: body.operadorEmail,
+      classificadores: body.classificadores,
+      observacoes: body.observacoes,
+    });
+
+    return NextResponse.json({ status: true, corrida: novaCorrida, log: novaCorrida });
   } catch (error: any) {
     return NextResponse.json({ status: false, error: error.message }, { status: 500 });
   }

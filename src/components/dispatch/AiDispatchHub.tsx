@@ -31,12 +31,17 @@ import {
   X,
   ExternalLink,
   Calendar,
+  Radio,
+  LogOut,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { RideExtractionData } from '../../lib/ai/schema';
 import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } from '../../lib/rules/classifier-engine';
 import { TaxiDigitalApiClient } from '../../lib/taxi-digital/client';
 import { ClassificationRuleValidator } from './ClassificationRuleValidator';
+import { PainelStatusAoVivo } from './PainelStatusAoVivo';
+import { ModalLoginDespachante } from '../auth/ModalLoginDespachante';
+import { DespachanteUsuario, DESPACHANTES_PREDEFINIDOS } from '@/lib/auth/despachantes';
 
 export interface AgendamentoLog {
   id: string;
@@ -109,6 +114,98 @@ export interface ContratoCorporativo {
 }
 
 export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
+  {
+    id: 'voll-geral',
+    nomeExibicao: 'VOLL (Corporativo Geral)',
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
+    palavrasChave: [
+      'voll',
+      'itau',
+      'itaú',
+      'itau unibanco',
+      'itau-m',
+      '#itau',
+      'heineken',
+      'hnk',
+      '#hnk',
+      'hnk-m',
+      'reserva voll',
+      'app voll',
+      'agendamento voll',
+    ],
+    regras: [
+      {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome (Solicitante / Passageiro)',
+        descricaoAjuda: 'Nome oficial do colaborador',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Voucher Voll',
+        descricaoAjuda: 'Identificador do agendamento Voll (ex: #ITAU-M18383400)',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Empresa',
+        descricaoAjuda: 'Empresa solicitante',
+        obrigatorio: false,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['ITAU', 'VOLL', 'TAXI 2.0', 'HEINEKEN'],
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Código de Acesso',
+        descricaoAjuda: 'Código classificador na central (ex: itau-0002, itau-0001, voll-004)',
+        obrigatorio: true,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['itau-0002', 'itau-0001', 'voll-004', 'tx20-001'],
+      },
+    ],
+  },
+  {
+    id: 'claro-voll',
+    nomeExibicao: 'CLARO VOLL (Plataforma Voll)',
+    uiCliente: '94961e94-143a-49b8-a314-6db0bcb7a48d',
+    palavrasChave: ['claro voll', 'claro', 'embratel', 'net claro', 'claro brasil', 'brasilcenter', '#claro'],
+    regras: [
+      {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome (Solicitante / Passageiro)',
+        descricaoAjuda: 'Nome oficial do colaborador',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Voucher',
+        descricaoAjuda: 'Código da reserva ou voucher (ex: #CLARO-M18456160)',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Empresa',
+        descricaoAjuda: 'Empresa autorizada',
+        obrigatorio: true,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['TÁXI 2.0', 'CLARO - BRASILCENTER', 'CLARO'],
+        valorFixo: 'TÁXI 2.0',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Informações - Contatos',
+        descricaoAjuda: 'Telefone ou ramal de contato',
+        obrigatorio: false,
+        tipoPreenchimento: 'MANUAL_LIVRE',
+      },
+    ],
+  },
   {
     id: 'unipar-direto',
     nomeExibicao: 'UNIPAR (Corporativo Direto)',
@@ -217,127 +314,10 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     ],
   },
   {
-    id: 'claro-voll',
-    nomeExibicao: 'CLARO VOLL (Plataforma Voll)',
-    uiCliente: '94961e94-143a-49b8-a314-6db0bcb7a48d',
-    palavrasChave: ['claro voll', 'claro', 'embratel', 'net claro', 'claro brasil', 'brasilcenter', '#claro'],
-    regras: [
-      {
-        numeroCampo: 0,
-        nomeExibicao: 'Nome (Solicitante / Passageiro)',
-        descricaoAjuda: 'Nome oficial do colaborador',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
-      },
-      {
-        numeroCampo: 1,
-        nomeExibicao: 'Voucher',
-        descricaoAjuda: 'Código da reserva ou voucher (ex: #CLARO-M18456160)',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
-      },
-      {
-        numeroCampo: 2,
-        nomeExibicao: 'Empresa',
-        descricaoAjuda: 'Empresa autorizada',
-        obrigatorio: true,
-        tipoPreenchimento: 'LISTA_SUSPENSA',
-        opcoesValidas: ['TÁXI 2.0', 'CLARO - BRASILCENTER', 'CLARO'],
-        valorFixo: 'TÁXI 2.0',
-      },
-      {
-        numeroCampo: 3,
-        nomeExibicao: 'Informações - Contatos',
-        descricaoAjuda: 'Telefone ou ramal de contato',
-        obrigatorio: false,
-        tipoPreenchimento: 'MANUAL_LIVRE',
-      },
-    ],
-  },
-  {
-    id: 'heineken-voll',
-    nomeExibicao: 'HEINEKEN (Voll / HNK)',
-    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
-    palavrasChave: ['heineken', 'hnk', '#hnk', 'hnk-m', 'un itu', 'itu corporativo', 'amanda gomes'],
-    regras: [
-      {
-        numeroCampo: 0,
-        nomeExibicao: 'Nome (Passageiro / Viajante)',
-        descricaoAjuda: 'Nome oficial do colaborador',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
-      },
-      {
-        numeroCampo: 1,
-        nomeExibicao: 'Código da Reserva / Voucher Voll',
-        descricaoAjuda: 'Código identificador do agendamento (ex: #HNK-M18456123)',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
-      },
-      {
-        numeroCampo: 2,
-        nomeExibicao: 'Unidade / Empresa',
-        descricaoAjuda: 'Unidade operacional da Heineken',
-        obrigatorio: false,
-        tipoPreenchimento: 'LISTA_SUSPENSA',
-        opcoesValidas: ['0001 - UN ITU / CORPORATIVO', 'HEINEKEN BRASIL', 'UN ITU', 'HEINEKEN'],
-        valorFixo: '0001 - UN ITU / CORPORATIVO',
-      },
-      {
-        numeroCampo: 3,
-        nomeExibicao: 'Telefone do Passageiro',
-        descricaoAjuda: 'Telefone com DDD',
-        obrigatorio: false,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-      },
-    ],
-  },
-  {
-    id: 'voll-geral',
-    nomeExibicao: 'VOLL (Corporativo Geral)',
-    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
-    palavrasChave: ['voll', 'itau', 'itaú', 'itau unibanco', 'itau-m', '#itau', 'reserva voll', 'app voll', 'agendamento voll'],
-    regras: [
-      {
-        numeroCampo: 0,
-        nomeExibicao: 'Nome (Solicitante / Passageiro)',
-        descricaoAjuda: 'Nome oficial do colaborador',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
-      },
-      {
-        numeroCampo: 1,
-        nomeExibicao: 'Voucher Voll',
-        descricaoAjuda: 'Identificador do agendamento Voll (ex: #ITAU-M18383400)',
-        obrigatorio: true,
-        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
-        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
-      },
-      {
-        numeroCampo: 2,
-        nomeExibicao: 'Empresa',
-        descricaoAjuda: 'Empresa solicitante',
-        obrigatorio: false,
-        tipoPreenchimento: 'LISTA_SUSPENSA',
-        opcoesValidas: ['ITAU', 'VOLL', 'TAXI 2.0'],
-      },
-      {
-        numeroCampo: 3,
-        nomeExibicao: 'Código de Acesso',
-        descricaoAjuda: 'Código classificador na central (ex: itau-0002, itau-0001, voll-004)',
-        obrigatorio: true,
-        tipoPreenchimento: 'LISTA_SUSPENSA',
-        opcoesValidas: ['itau-0002', 'itau-0001', 'voll-004', 'tx20-001'],
-      },
-    ],
-  },
-  {
     id: 'padrao-b2b',
-    nomeExibicao: 'Contrato Padrão B2B (Táxi 2.0)',
+    nomeExibicao: 'CLIENTES DIVERSOS (Faturamento B2B)',
     uiCliente: 'CLIENTE_PADRAO_01',
-    palavrasChave: [],
+    palavrasChave: ['outros', 'avulso', 'padrao', 'spot'],
     regras: [
       {
         numeroCampo: 0,
@@ -378,7 +358,7 @@ export const AiDispatchHub: React.FC = () => {
   const [isProcessingAi, setIsProcessingAi] = useState(false);
 
   // CONTRATOS DINÂMICOS & CONTROLE MANUAL
-  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('unipar-direto');
+  const [contratoSelecionadoId, setContratoSelecionadoId] = useState<string>('voll-geral');
   const [contratoAutoDetectado, setContratoAutoDetectado] = useState(false);
   const [contratoModoManual, setContratoModoManual] = useState(false);
   const contratoModoManualRef = useRef(false);
@@ -407,13 +387,18 @@ export const AiDispatchHub: React.FC = () => {
   const [destinoCoords, setDestinoCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [colandoClipboard, setColandoClipboard] = useState(false);
 
+  // ABAS PRINCIPAIS & AUTENTICAÇÃO DE DESPACHANTES
+  const [abaPrincipal, setAbaPrincipal] = useState<'DESPACHO' | 'STATUS_AO_VIVO'>('DESPACHO');
+  const [modalLoginAberto, setModalLoginAberto] = useState(false);
+  const [despachanteAutenticado, setDespachanteAutenticado] = useState<DespachanteUsuario | null>(null);
+
   // ESTADOS DE AUDITORIA & HISTÓRICO (LOG) E CHAVE GEMINI
   const [modalLogAberto, setModalLogAberto] = useState(false);
   const [modalChaveGeminiAberto, setModalChaveGeminiAberto] = useState(false);
   const [chaveGeminiInput, setChaveGeminiInput] = useState('');
   const [temChaveGeminiConfigurada, setTemChaveGeminiConfigurada] = useState(false);
   const [salvandoChaveGemini, setSalvandoChaveGemini] = useState(false);
-  const [nomeOperador, setNomeOperador] = useState('Operador Central');
+  const [nomeOperador, setNomeOperador] = useState('Eduardo (Gestor Geral)');
   const [editandoOperador, setEditandoOperador] = useState(false);
   const [historicoLogs, setHistoricoLogs] = useState<AgendamentoLog[]>([]);
   const [filtroLog, setFiltroLog] = useState('');
@@ -426,10 +411,20 @@ export const AiDispatchHub: React.FC = () => {
         setChaveGeminiInput(savedKey);
         setTemChaveGeminiConfigurada(true);
       }
-      const savedOp = localStorage.getItem('taxi20_operador_atual') || '';
-      if (savedOp) {
-        setNomeOperador(savedOp);
+      
+      const savedAuth = localStorage.getItem('taxi20_auth_session');
+      if (savedAuth) {
+        try {
+          const desp = JSON.parse(savedAuth);
+          setDespachanteAutenticado(desp);
+          setNomeOperador(desp.nome);
+        } catch {}
+      } else {
+        const padrao = DESPACHANTES_PREDEFINIDOS[0];
+        setDespachanteAutenticado(padrao);
+        setNomeOperador(padrao.nome);
       }
+
       const savedLogs = localStorage.getItem('taxi20_historico_agendamentos');
       if (savedLogs) {
         try {
@@ -438,6 +433,24 @@ export const AiDispatchHub: React.FC = () => {
       }
     }
   }, []);
+
+  const handleLoginSucesso = (desp: DespachanteUsuario) => {
+    setDespachanteAutenticado(desp);
+    setNomeOperador(desp.nome);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('taxi20_auth_session', JSON.stringify(desp));
+      localStorage.setItem('taxi20_operador_atual', desp.nome);
+    }
+    setModalLoginAberto(false);
+  };
+
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('taxi20_auth_session');
+    }
+    setDespachanteAutenticado(null);
+    setModalLoginAberto(true);
+  };
 
   const handleSalvarChaveGemini = () => {
     setSalvandoChaveGemini(true);
@@ -1082,6 +1095,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
           destino: formDestino,
           classificadores: resultadoRules.classificadoresProntos,
           observacoes: formObservacoes,
+          operador: nomeOperador || 'Operador Central',
         }),
       });
 
@@ -1159,7 +1173,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased">
       {/* 1. TOPBAR PROFISSIONAL FIXA DE PONTA A PONTA */}
       <header className="sticky top-0 z-40 w-full bg-white border-b border-slate-200 shadow-2xs">
-        <div className="w-full max-w-[1520px] mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
+        <div className="w-full max-w-[1520px] mx-auto px-4 md:px-6 h-16 flex items-center justify-between gap-3">
           {/* Logo e Nome da Aplicação */}
           <div className="flex items-center gap-3">
             <div className="relative h-10 w-28 sm:w-32 flex items-center">
@@ -1179,8 +1193,57 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
             </div>
           </div>
 
-          {/* À direita: atalhos rápidos ou botão de status da fila de agendamentos */}
+          {/* Seletor de Abas no Centro: Novo Despacho vs Painel ao Vivo */}
+          <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+            <button
+              type="button"
+              onClick={() => setAbaPrincipal('DESPACHO')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                abaPrincipal === 'DESPACHO'
+                  ? 'bg-white text-slate-900 shadow-xs ring-1 ring-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Car className="w-3.5 h-3.5 text-blue-600" />
+              <span>Novo Despacho</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAbaPrincipal('STATUS_AO_VIVO')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                abaPrincipal === 'STATUS_AO_VIVO'
+                  ? 'bg-white text-slate-900 shadow-xs ring-1 ring-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+              <span>Status ao Vivo (Frota)</span>
+            </button>
+          </div>
+
+          {/* À direita: atalhos rápidos e identificação do despachante */}
           <div className="flex items-center gap-2">
+            {/* Despachante Autenticado */}
+            <button
+              type="button"
+              onClick={() => setModalLoginAberto(true)}
+              className="px-2.5 py-1.5 rounded-xl border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 text-left transition-colors flex items-center gap-2 cursor-pointer shadow-2xs"
+              title="Clique para trocar o despachante autenticado"
+            >
+              <div className={`w-6 h-6 rounded-lg ${despachanteAutenticado?.avatarCor || 'bg-blue-600'} text-white flex items-center justify-center text-[10px] font-bold shrink-0`}>
+                {despachanteAutenticado?.nome.charAt(0) || 'D'}
+              </div>
+              <div className="hidden xl:block min-w-0">
+                <div className="text-[11px] font-bold text-slate-900 truncate">
+                  {despachanteAutenticado?.nome.split('(')[0].trim() || nomeOperador}
+                </div>
+                <div className="text-[9px] text-slate-400 font-semibold uppercase">
+                  {despachanteAutenticado?.perfil || 'Operador'} • Trocar
+                </div>
+              </div>
+            </button>
+
             {/* Botão Configurar Chave Gemini */}
             <button
               type="button"
@@ -1222,14 +1285,6 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
               <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
               <span className="hidden sm:inline">Novo</span>
             </button>
-
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-medium text-emerald-800">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="font-semibold">Fila Ativa</span>
-            </div>
           </div>
         </div>
       </header>
@@ -1742,8 +1797,15 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
 
       {/* ÁREA PRINCIPAL FULL-WIDTH FLUIDA */}
       <main className="max-w-[1520px] mx-auto px-4 md:px-6 py-5">
-        {/* PASSO 1: SELEÇÃO DO CONTRATO CORPORATIVO BASE */}
-        <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-sm space-y-3 mb-5">
+        {abaPrincipal === 'STATUS_AO_VIVO' ? (
+          <PainelStatusAoVivo
+            onVoltarDespacho={() => setAbaPrincipal('DESPACHO')}
+            operadorAtivoNome={despachanteAutenticado?.nome || nomeOperador}
+          />
+        ) : (
+          <>
+            {/* PASSO 1: SELEÇÃO DO CONTRATO CORPORATIVO BASE */}
+            <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-sm space-y-3 mb-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
             <div className="flex items-center gap-2.5">
               <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
@@ -1769,7 +1831,7 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
           </div>
 
           {/* Grade de Contratos */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {CONTRATOS_DISPONIVEIS.map((c) => {
               const isSelected = c.id === contratoSelecionadoId;
               return (
@@ -2396,7 +2458,16 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
           </div>
 
         </div>
+          </>
+        )}
       </main>
+
+      {/* MODAL DE LOGIN DE DESPACHANTES */}
+      <ModalLoginDespachante
+        aberto={modalLoginAberto}
+        onLoginSucesso={handleLoginSucesso}
+        onFechar={() => setModalLoginAberto(false)}
+      />
 
       {/* FOOTER OFICIAL DE CRÉDITOS */}
       <footer className="w-full mt-10 py-6 border-t border-slate-200 bg-white">

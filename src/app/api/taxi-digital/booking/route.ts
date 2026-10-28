@@ -45,6 +45,12 @@ const MAPA_CONTRATOS: Record<string, ContratoConfig> = {
     authorizedId: '6989e993-022a-468f-b6b6-609b455d7102',
     userEmail: 'contato@taxidoispontozero.com.br',
   },
+  'outros-clientes': {
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
+    contractNumber: '55000',
+    authorizedId: '6989e993-022a-468f-b6b6-609b455d7102',
+    userEmail: 'contato@taxidoispontozero.com.br',
+  },
 };
 
 function limparEnderecoParaGeocode(endereco: string): string {
@@ -128,6 +134,7 @@ export async function POST(req: NextRequest) {
       classificadores = {},
       observacoes = '',
       categoryId: categoryIdFromBody,
+      operador = 'Operador Central',
     } = body;
 
     const baseUrl = process.env.TAXI_DIGITAL_BASE_URL || 'https://api.taxidigital.net/APITD';
@@ -308,7 +315,7 @@ export async function POST(req: NextRequest) {
       schedule_date: dataFormatada,
       schedule_time: horaFormatada,
       schedule_lead_time: 40,
-      operator_observation: `${cleanVoucher} ${observacoes}`.trim(),
+      operator_observation: `[Op: ${operador}] ${cleanVoucher} ${observacoes}`.trim(),
       contract_number: contratoConfig.contractNumber,
       payment_id: 2, // Voucher Eletrônico
       category_id: categoryId,
@@ -322,6 +329,7 @@ export async function POST(req: NextRequest) {
     };
 
     console.log('[Táxi Digital] Transmitindo agendamento para a central:', {
+      operador: operador,
       contrato: contratoConfig.contractNumber,
       passageiro: passageiroNome,
       voucher: cleanVoucher,
