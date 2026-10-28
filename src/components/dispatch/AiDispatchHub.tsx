@@ -24,12 +24,41 @@ import {
   Share2,
   Clipboard,
   Trash2,
+  Key,
+  Search,
+  Download,
+  History,
+  X,
+  ExternalLink,
+  Calendar,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { RideExtractionData } from '../../lib/ai/schema';
 import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } from '../../lib/rules/classifier-engine';
 import { TaxiDigitalApiClient } from '../../lib/taxi-digital/client';
 import { ClassificationRuleValidator } from './ClassificationRuleValidator';
+
+export interface AgendamentoLog {
+  id: string;
+  timestamp: string;
+  operador: string;
+  bookingId: string;
+  voucher: string;
+  status: string;
+  passageiroNome: string;
+  passageiroTelefone: string;
+  contratoId: string;
+  contratoNome: string;
+  data: string;
+  hora: string;
+  tipo: string;
+  origem: string;
+  destino: string;
+  categoriaNome: string;
+  valorEstimado?: number;
+  classificadores?: any;
+  observacoes?: string;
+}
 
 const MiniMapaRota = dynamic(
   () => import('./MiniMapaRota').then((mod) => mod.MiniMapaRota),
@@ -227,6 +256,45 @@ export const CONTRATOS_DISPONIVEIS: ContratoCorporativo[] = [
     ],
   },
   {
+    id: 'heineken-voll',
+    nomeExibicao: 'HEINEKEN (Voll / HNK)',
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
+    palavrasChave: ['heineken', 'hnk', '#hnk', 'hnk-m', 'un itu', 'itu corporativo', 'amanda gomes'],
+    regras: [
+      {
+        numeroCampo: 0,
+        nomeExibicao: 'Nome (Passageiro / Viajante)',
+        descricaoAjuda: 'Nome oficial do colaborador',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_NOME',
+      },
+      {
+        numeroCampo: 1,
+        nomeExibicao: 'Código da Reserva / Voucher Voll',
+        descricaoAjuda: 'Código identificador do agendamento (ex: #HNK-M18456123)',
+        obrigatorio: true,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+        regexPadrao: '^#?[A-Z0-9]+-[A-Z0-9]+$',
+      },
+      {
+        numeroCampo: 2,
+        nomeExibicao: 'Unidade / Empresa',
+        descricaoAjuda: 'Unidade operacional da Heineken',
+        obrigatorio: false,
+        tipoPreenchimento: 'LISTA_SUSPENSA',
+        opcoesValidas: ['0001 - UN ITU / CORPORATIVO', 'HEINEKEN BRASIL', 'UN ITU', 'HEINEKEN'],
+        valorFixo: '0001 - UN ITU / CORPORATIVO',
+      },
+      {
+        numeroCampo: 3,
+        nomeExibicao: 'Telefone do Passageiro',
+        descricaoAjuda: 'Telefone com DDD',
+        obrigatorio: false,
+        tipoPreenchimento: 'EXTRAIDO_IA_REGEX',
+      },
+    ],
+  },
+  {
     id: 'voll-geral',
     nomeExibicao: 'VOLL (Corporativo Geral)',
     uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
@@ -338,6 +406,121 @@ export const AiDispatchHub: React.FC = () => {
   const [origemCoords, setOrigemCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [destinoCoords, setDestinoCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [colandoClipboard, setColandoClipboard] = useState(false);
+
+  // ESTADOS DE AUDITORIA & HISTÓRICO (LOG) E CHAVE GEMINI
+  const [modalLogAberto, setModalLogAberto] = useState(false);
+  const [modalChaveGeminiAberto, setModalChaveGeminiAberto] = useState(false);
+  const [chaveGeminiInput, setChaveGeminiInput] = useState('');
+  const [temChaveGeminiConfigurada, setTemChaveGeminiConfigurada] = useState(false);
+  const [salvandoChaveGemini, setSalvandoChaveGemini] = useState(false);
+  const [nomeOperador, setNomeOperador] = useState('Operador Central');
+  const [editandoOperador, setEditandoOperador] = useState(false);
+  const [historicoLogs, setHistoricoLogs] = useState<AgendamentoLog[]>([]);
+  const [filtroLog, setFiltroLog] = useState('');
+  const [logSelecionadoParaDetalhes, setLogSelecionadoParaDetalhes] = useState<AgendamentoLog | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedKey = localStorage.getItem('taxi20_gemini_api_key') || '';
+      if (savedKey) {
+        setChaveGeminiInput(savedKey);
+        setTemChaveGeminiConfigurada(true);
+      }
+      const savedOp = localStorage.getItem('taxi20_operador_atual') || '';
+      if (savedOp) {
+        setNomeOperador(savedOp);
+      }
+      const savedLogs = localStorage.getItem('taxi20_historico_agendamentos');
+      if (savedLogs) {
+        try {
+          setHistoricoLogs(JSON.parse(savedLogs));
+        } catch {}
+      }
+    }
+  }, []);
+
+  const handleSalvarChaveGemini = () => {
+    setSalvandoChaveGemini(true);
+    try {
+      const keyTrimmed = chaveGeminiInput.trim();
+      if (typeof window !== 'undefined') {
+        if (keyTrimmed) {
+          localStorage.setItem('taxi20_gemini_api_key', keyTrimmed);
+          setTemChaveGeminiConfigurada(true);
+        } else {
+          localStorage.removeItem('taxi20_gemini_api_key');
+          setTemChaveGeminiConfigurada(false);
+        }
+      }
+      setModalChaveGeminiAberto(false);
+    } finally {
+      setSalvandoChaveGemini(false);
+    }
+  };
+
+  const handleSalvarOperador = (novoNome: string) => {
+    const nome = novoNome.trim() || 'Operador Central';
+    setNomeOperador(nome);
+    setEditandoOperador(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('taxi20_operador_atual', nome);
+    }
+  };
+
+  const exportarLogCsv = () => {
+    if (historicoLogs.length === 0) {
+      alert('Nenhum agendamento registrado no histórico para exportar.');
+      return;
+    }
+    const headers = [
+      'Data Criação',
+      'Operador',
+      'Booking ID',
+      'Voucher',
+      'Passageiro',
+      'Telefone',
+      'Contrato',
+      'Data Corrida',
+      'Horário',
+      'Origem',
+      'Destino',
+      'Valor Previsto',
+      'Status',
+    ];
+    const rows = historicoLogs.map((l) => [
+      new Date(l.timestamp).toLocaleString('pt-BR'),
+      `"${l.operador}"`,
+      `"${l.bookingId}"`,
+      `"${l.voucher}"`,
+      `"${l.passageiroNome}"`,
+      `"${l.passageiroTelefone}"`,
+      `"${l.contratoNome}"`,
+      `"${l.data}"`,
+      `"${l.hora}"`,
+      `"${l.origem.replace(/"/g, '""')}"`,
+      `"${(l.destino || '').replace(/"/g, '""')}"`,
+      l.valorEstimado ? `R$ ${l.valorEstimado.toFixed(2)}` : '',
+      `"${l.status}"`,
+    ]);
+    const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `log_agendamentos_taxi20_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleLimparHistorico = () => {
+    if (confirm('Tem certeza que deseja limpar o histórico de agendamentos local? Esta ação não pode ser desfeita.')) {
+      setHistoricoLogs([]);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('taxi20_historico_agendamentos');
+      }
+    }
+  };
 
   const taxiClientRef = useRef(new TaxiDigitalApiClient());
 
@@ -559,12 +742,18 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
 
     try {
       const base64Otimizado = await otimizarPrintBase64(base64);
+      const savedKey = typeof window !== 'undefined' ? localStorage.getItem('taxi20_gemini_api_key') || '' : '';
+
       const response = await fetch('/api/ai/extract', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(savedKey ? { 'x-gemini-key': savedKey } : {}),
+        },
         body: JSON.stringify({
           tipo: 'IMAGEM_BASE64',
           conteudo: base64Otimizado,
+          customApiKey: savedKey,
         }),
         signal: controller.signal,
       });
@@ -581,7 +770,11 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       if (err.name === 'AbortError') {
         alert('Tempo limite excedido ao processar print com IA. O sistema usará os dados inseridos ou você pode tentar novamente.');
       } else {
-        alert('Aviso da IA: ' + (err.message || 'Falha ao processar o print. Verifique a chave GEMINI_API_KEY.'));
+        const msg = err.message || 'Falha ao processar print.';
+        if (msg.includes('GEMINI_API_KEY') || msg.includes('Google Gemini') || msg.includes('chave')) {
+          setModalChaveGeminiAberto(true);
+        }
+        alert('Aviso da IA: ' + msg);
       }
     } finally {
       clearTimeout(timeoutId);
@@ -598,12 +791,17 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     const timeoutId = setTimeout(() => controller.abort(), 40000);
 
     try {
+      const savedKey = typeof window !== 'undefined' ? localStorage.getItem('taxi20_gemini_api_key') || '' : '';
       const response = await fetch('/api/ai/extract', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(savedKey ? { 'x-gemini-key': savedKey } : {}),
+        },
         body: JSON.stringify({
           tipo: 'TEXTO_LIVRE',
           conteudo: conteudoTexto,
+          customApiKey: savedKey,
         }),
         signal: controller.signal,
       });
@@ -620,7 +818,11 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       if (err.name === 'AbortError') {
         alert('Tempo limite excedido ao processar texto.');
       } else {
-        alert('Aviso da IA: ' + (err.message || 'Falha ao processar o texto.'));
+        const msg = err.message || 'Falha ao processar texto.';
+        if (msg.includes('GEMINI_API_KEY') || msg.includes('Google Gemini')) {
+          setModalChaveGeminiAberto(true);
+        }
+        alert('Aviso da IA: ' + msg);
       }
     } finally {
       clearTimeout(timeoutId);
@@ -736,6 +938,14 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
         novos['classificador1'] = dados.classificadores.codigoOsChamado;
       }
       novos['classificador2'] = 'TÁXI 2.0';
+    } else if (contratoId === 'heineken-voll') {
+      if (dados?.classificadores?.codigoOsChamado) {
+        novos['classificador1'] = dados.classificadores.codigoOsChamado;
+      }
+      novos['classificador2'] = '0001 - UN ITU / CORPORATIVO';
+      if (formPassageiro.telefone) {
+        novos['classificador3'] = formPassageiro.telefone;
+      }
     } else {
       if (dados?.classificadores?.codigoOsChamado) {
         novos['classificador1'] = dados.classificadores.codigoOsChamado;
@@ -882,7 +1092,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       }
 
       const catEscolhida = categoriasDisponiveis.find((c) => c.id === categoriaSelecionadaId);
-      setResultadoDespacho({
+      const detalhesSucesso: DetalhesDespachoSucesso = {
         bookingId: String(res.booking_id || res.voucher || 'VCH-TD'),
         voucher: res.voucher || 'VCH-AUTO',
         status: res.status_corrida || (formViagem.tipo === 'IMEDIATO' ? 'EM DESPACHO' : 'AGENDADA'),
@@ -898,7 +1108,45 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
         contratoNome: contratoAtual.nomeExibicao,
         centroCusto: resultadoRules.classificadoresProntos.classificador2 || '',
         solicitante: resultadoRules.classificadoresProntos.nomeSolicitante || '',
+      };
+      setResultadoDespacho(detalhesSucesso);
+
+      // REGISTRO DE AUDITORIA & LOG ("QUEM FEZ")
+      const novoLogItem: AgendamentoLog = {
+        id: `LOG-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        operador: nomeOperador || 'Operador Central',
+        bookingId: detalhesSucesso.bookingId,
+        voucher: detalhesSucesso.voucher,
+        status: detalhesSucesso.status,
+        passageiroNome: formPassageiro.nome,
+        passageiroTelefone: formPassageiro.telefone,
+        contratoId: contratoSelecionadoId,
+        contratoNome: contratoAtual.nomeExibicao,
+        data: formViagem.data,
+        hora: formViagem.hora,
+        tipo: formViagem.tipo,
+        origem: formOrigem,
+        destino: formDestino,
+        categoriaNome: detalhesSucesso.categoriaNome,
+        valorEstimado: estimativa?.valor,
+        classificadores: resultadoRules.classificadoresProntos,
+        observacoes: formObservacoes,
+      };
+
+      setHistoricoLogs((prev) => {
+        const atualizados = [novoLogItem, ...prev];
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('taxi20_historico_agendamentos', JSON.stringify(atualizados.slice(0, 100)));
+        }
+        return atualizados;
       });
+
+      fetch('/api/dispatch/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(novoLogItem),
+      }).catch(() => {});
     } catch (err: any) {
       console.error('Falha no despacho:', err);
       alert('Aviso da Central Táxi Digital: ' + (err.message || 'Falha ao agendar corrida.'));
@@ -932,7 +1180,39 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
           </div>
 
           {/* À direita: atalhos rápidos ou botão de status da fila de agendamentos */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
+            {/* Botão Configurar Chave Gemini */}
+            <button
+              type="button"
+              onClick={() => setModalChaveGeminiAberto(true)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                temChaveGeminiConfigurada
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+              }`}
+              title="Configurar chave do Google Gemini para OCR Multimodal"
+            >
+              <Key className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden sm:inline">Chave IA</span>
+              <span className={`w-2 h-2 rounded-full ${temChaveGeminiConfigurada ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            </button>
+
+            {/* Botão Log de Agendamentos Realizados */}
+            <button
+              type="button"
+              onClick={() => setModalLogAberto(true)}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Consultar histórico de agendamentos e quem realizou"
+            >
+              <History className="w-3.5 h-3.5 text-blue-600" />
+              <span>Log</span>
+              {historicoLogs.length > 0 && (
+                <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                  {historicoLogs.length}
+                </span>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={handleNovoAgendamento}
@@ -940,19 +1220,339 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
               title="Iniciar novo agendamento e limpar formulário"
             >
               <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
-              <span className="hidden sm:inline">Novo Agendamento</span>
+              <span className="hidden sm:inline">Novo</span>
             </button>
 
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-medium text-emerald-800">
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-medium text-emerald-800">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="font-semibold">Fila de Agendamentos: Ativa</span>
+              <span className="font-semibold">Fila Ativa</span>
             </div>
           </div>
         </div>
       </header>
+
+      {/* MODAL CONFIGURAR CHAVE GOOGLE GEMINI */}
+      {modalChaveGeminiAberto && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center border border-amber-200">
+                  <Key className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Configuração da Chave Gemini</h3>
+                  <p className="text-[11px] text-slate-500">Inteligência Artificial Multimodal para Prints</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalChaveGeminiAberto(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <p className="text-slate-600 leading-relaxed">
+                Para processar capturas de tela e prints reais sem limites ou falhas, informe sua chave da API do Google Gemini.
+                Ela fica armazenada com segurança no seu navegador.
+              </p>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-slate-700 block">
+                  Chave de API do Google Gemini (GEMINI_API_KEY)
+                </label>
+                <input
+                  type="password"
+                  value={chaveGeminiInput}
+                  onChange={(e) => setChaveGeminiInput(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="w-full h-10 px-3 text-xs rounded-lg border border-slate-300 font-mono outline-none focus:border-slate-800 focus:ring-2 focus:ring-slate-100"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
+                <div className="font-semibold text-slate-800 text-[11px]">Como obter sua chave gratuita:</div>
+                <p className="text-[11px] text-slate-500">
+                  1. Acesse o Google AI Studio gratuitamente.<br />
+                  2. Crie uma API Key em menos de 1 minuto.<br />
+                  3. Cole aqui para ativar o OCR instantâneo.
+                </p>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline pt-1"
+                >
+                  <span>Abrir Google AI Studio</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleSalvarChaveGemini}
+                disabled={salvandoChaveGemini}
+                className="flex-1 py-2.5 px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              >
+                <Check className="w-4 h-4" />
+                <span>Salvar Chave</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalChaveGeminiAberto(false)}
+                className="py-2.5 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL / DRAWER HISTÓRICO & AUDITORIA DE AGENDAMENTOS (LOG) */}
+      {modalLogAberto && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Header do Log */}
+            <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-200 shadow-2xs">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Histórico & Log de Agendamentos</h3>
+                  <p className="text-xs text-slate-500">
+                    Registro de todas as corridas transmitidas para a central Táxi Digital e consulta de quem fez
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={exportarLogCsv}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  title="Exportar registros em formato CSV para Excel"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Exportar CSV</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setModalLogAberto(false)}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                  title="Fechar histórico"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de Ferramentas: Identificação do Operador ("Quem Fez") + Filtro de Busca */}
+            <div className="p-4 border-b border-slate-100 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* Quem Fez (Operador Atual) */}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-500">Operador Atual:</span>
+                {editandoOperador ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      defaultValue={nomeOperador}
+                      id="inputNomeOperador"
+                      className="h-8 px-2.5 text-xs rounded-md border border-slate-300 font-medium"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSalvarOperador((e.target as HTMLInputElement).value);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const input = document.getElementById('inputNomeOperador') as HTMLInputElement;
+                        handleSalvarOperador(input?.value || nomeOperador);
+                      }}
+                      className="h-8 px-2.5 rounded-md bg-slate-900 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      OK
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">
+                      {nomeOperador}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEditandoOperador(true)}
+                      className="text-[11px] text-blue-600 hover:underline cursor-pointer"
+                    >
+                      Alterar
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Filtro de Busca */}
+              <div className="relative w-full sm:w-72">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={filtroLog}
+                  onChange={(e) => setFiltroLog(e.target.value)}
+                  placeholder="Buscar por passageiro, voucher, operador..."
+                  className="w-full h-8 pl-8 pr-3 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white outline-none focus:border-slate-800"
+                />
+              </div>
+            </div>
+
+            {/* Lista / Tabela de Agendamentos */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+              {historicoLogs.length === 0 ? (
+                <div className="py-12 text-center space-y-2">
+                  <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
+                    <History className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-semibold text-slate-700">Nenhum agendamento registrado ainda</h4>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Assim que você validar e agendar corridas pela plataforma Táxi 2.0, o histórico registrará quem fez, horário e voucher.
+                  </p>
+                </div>
+              ) : (
+                historicoLogs
+                  .filter((log) => {
+                    if (!filtroLog.trim()) return true;
+                    const termo = filtroLog.toLowerCase();
+                    return (
+                      log.passageiroNome.toLowerCase().includes(termo) ||
+                      log.bookingId.toLowerCase().includes(termo) ||
+                      log.voucher.toLowerCase().includes(termo) ||
+                      log.operador.toLowerCase().includes(termo) ||
+                      log.contratoNome.toLowerCase().includes(termo) ||
+                      log.origem.toLowerCase().includes(termo)
+                    );
+                  })
+                  .map((log) => (
+                    <div
+                      key={log.id}
+                      className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all shadow-2xs space-y-2.5"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-sm text-slate-900 bg-slate-100 px-2.5 py-0.5 rounded border border-slate-200">
+                            {log.bookingId}
+                          </span>
+                          <span className="text-xs font-semibold text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                            {log.contratoNome.split('(')[0].trim()}
+                          </span>
+                          <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                            {log.status}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-slate-500 flex items-center gap-2">
+                          <span>Operador: <strong className="text-slate-800">{log.operador}</strong></span>
+                          <span>•</span>
+                          <span>{new Date(log.timestamp).toLocaleString('pt-BR')}</span>
+                        </div>
+                      </div>
+
+                      {/* Dados da Corrida */}
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs pt-1 border-t border-slate-100">
+                        <div className="sm:col-span-4">
+                          <span className="text-[10px] uppercase font-semibold text-slate-400 block">Passageiro</span>
+                          <span className="font-semibold text-slate-800">{log.passageiroNome}</span>
+                          {log.passageiroTelefone && (
+                            <span className="text-[11px] text-slate-500 block">{log.passageiroTelefone}</span>
+                          )}
+                        </div>
+
+                        <div className="sm:col-span-5">
+                          <span className="text-[10px] uppercase font-semibold text-slate-400 block">Trajeto</span>
+                          <span className="text-slate-700 truncate block font-medium">De: {log.origem}</span>
+                          {log.destino && (
+                            <span className="text-slate-700 truncate block font-medium">Para: {log.destino}</span>
+                          )}
+                        </div>
+
+                        <div className="sm:col-span-3 text-right">
+                          <span className="text-[10px] uppercase font-semibold text-slate-400 block">Agendamento</span>
+                          <span className="font-semibold text-slate-900">{log.data} às {log.hora}</span>
+                          {log.valorEstimado && (
+                            <span className="text-[11px] font-bold text-blue-700 block">
+                              R$ {log.valorEstimado.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Ações Rápidas */}
+                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const texto = `🚖 *CONFIRMAÇÃO DE TRASLADO - TÁXI 2.0*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 *VOUCHER / BOOKING ID:* ${log.bookingId}
+🎫 *Código da Reserva / Ref:* ${log.voucher}
+👤 *Passageiro:* ${log.passageiroNome} (${log.passageiroTelefone || 'Sem tel'})
+📅 *Data e Horário:* ${log.data} às ${log.hora}
+📍 *Embarque:* ${log.origem}
+🏁 *Desembarque:* ${log.destino || 'A definir'}
+🏢 *Contrato:* ${log.contratoNome}
+🚗 *Categoria Táxi:* ${log.categoriaNome}
+${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}\n` : ''}👤 *Operador Responsável:* ${log.operador}
+✅ *Status:* Agendado com sucesso na central Táxi Digital.`;
+                            navigator.clipboard.writeText(texto);
+                            alert('Comprovante formatado copiado para a área de transferência!');
+                          }}
+                          className="px-2.5 py-1 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>Copiar Comprovante</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            {/* Footer do Modal */}
+            <div className="p-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+              <span className="text-slate-500">
+                Total de agendamentos no LOG: <strong>{historicoLogs.length}</strong>
+              </span>
+              <div className="flex items-center gap-2">
+                {historicoLogs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleLimparHistorico}
+                    className="text-xs text-red-600 hover:text-red-800 font-medium cursor-pointer"
+                  >
+                    Limpar Histórico Local
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setModalLogAberto(false)}
+                  className="px-4 py-1.5 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-800 cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL OFICIAL DE CONFIRMAÇÃO DO SERVIÇO AGENDADO */}
       {resultadoDespacho && (
@@ -1142,6 +1742,75 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
 
       {/* ÁREA PRINCIPAL FULL-WIDTH FLUIDA */}
       <main className="max-w-[1520px] mx-auto px-4 md:px-6 py-5">
+        {/* PASSO 1: SELEÇÃO DO CONTRATO CORPORATIVO BASE */}
+        <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-sm space-y-3 mb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+            <div className="flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                1
+              </span>
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  Selecione o Contrato Corporativo Base
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Os classificadores, regras de auditoria e validações de faturamento são carregados com base no contrato ativo.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-slate-500">Contrato Ativo:</span>
+              <span className="font-semibold text-blue-900 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5 text-blue-600 stroke-[3]" />
+                {contratoAtual.nomeExibicao}
+              </span>
+            </div>
+          </div>
+
+          {/* Grade de Contratos */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            {CONTRATOS_DISPONIVEIS.map((c) => {
+              const isSelected = c.id === contratoSelecionadoId;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    setContratoSelecionadoId(c.id);
+                    contratoModoManualRef.current = true;
+                    adaptarClassificadoresParaContrato(c.id);
+                    if (formOrigem) {
+                      calcularEstimativaRota(formOrigem, formDestino, c.id);
+                    }
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                    isSelected
+                      ? 'border-blue-600 bg-blue-50/70 shadow-xs ring-2 ring-blue-500/20'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60'
+                  }`}
+                >
+                  {isSelected && (
+                    <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-blue-600"></span>
+                  )}
+                  <div>
+                    <div className={`text-xs font-bold truncate ${isSelected ? 'text-blue-950' : 'text-slate-800'}`}>
+                      {c.nomeExibicao.split('(')[0].trim()}
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                      {c.nomeExibicao.includes('(') ? `(${c.nomeExibicao.split('(')[1]}` : 'Corporativo'}
+                    </div>
+                  </div>
+                  <div className="mt-2.5 text-[10px] font-semibold text-slate-400 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-slate-400" />
+                    <span>{c.regras.length} classificadores</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           
           {/* COLUNA ESQUERDA: INGESTÃO & FEEDBACK (5 colunas) */}
@@ -1150,31 +1819,36 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
             {/* Card de Ingestão de Chamados */}
             <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-sm space-y-3.5">
               
-              {/* Abas [Print / Imagem] e [Texto Livre] */}
+              {/* Abas [Print / Imagem] e [Texto Livre] com identificador de Passo 2 */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="bg-slate-100 p-1 rounded-lg border border-slate-200/60 inline-flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('PRINT')}
-                    className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer ${
-                      activeTab === 'PRINT'
-                        ? 'bg-white shadow-2xs font-semibold text-slate-900'
-                        : 'text-slate-500 hover:text-slate-700 font-medium'
-                    }`}
-                  >
-                    Print / Imagem
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('TEXTO')}
-                    className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer ${
-                      activeTab === 'TEXTO'
-                        ? 'bg-white shadow-2xs font-semibold text-slate-900'
-                        : 'text-slate-500 hover:text-slate-700 font-medium'
-                    }`}
-                  >
-                    Texto Livre
-                  </button>
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                    2
+                  </span>
+                  <div className="bg-slate-100 p-1 rounded-lg border border-slate-200/60 inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('PRINT')}
+                      className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer ${
+                        activeTab === 'PRINT'
+                          ? 'bg-white shadow-2xs font-semibold text-slate-900'
+                          : 'text-slate-500 hover:text-slate-700 font-medium'
+                      }`}
+                    >
+                      Print / Imagem
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('TEXTO')}
+                      className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer ${
+                        activeTab === 'TEXTO'
+                          ? 'bg-white shadow-2xs font-semibold text-slate-900'
+                          : 'text-slate-500 hover:text-slate-700 font-medium'
+                      }`}
+                    >
+                      Texto Livre
+                    </button>
+                  </div>
                 </div>
 
                 <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1">
@@ -1471,13 +2145,18 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
               
               {/* Header do Validador */}
               <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-                    Validador Operacional
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Conferência e validação rápida antes do envio para a frota
-                  </p>
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    3
+                  </span>
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
+                      Validador Operacional
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Conferência dos classificadores exigidos pelo contrato ativo
+                    </p>
+                  </div>
                 </div>
 
                 {dadosAutorizado && (

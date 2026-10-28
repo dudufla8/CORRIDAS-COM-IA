@@ -22,6 +22,14 @@ const MAPA_CONTRATOS: Record<string, ContratoConfig> = {
     uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
     contractNumber: '55000',
   },
+  'heineken-voll': {
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
+    contractNumber: '55000',
+  },
+  'padrao-b2b': {
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
+    contractNumber: '55000',
+  },
 };
 
 function limparEnderecoParaGeocode(endereco: string): string {

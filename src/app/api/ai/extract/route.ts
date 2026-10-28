@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { tipo, conteudo, mimeType } = body;
+    const { tipo, conteudo, mimeType, customApiKey } = body;
 
     if (!conteudo) {
       return NextResponse.json(
@@ -16,7 +16,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const extractor = new AiDispatchExtractorService();
+    const headerKey = req.headers.get('x-gemini-key') || '';
+    const keyToUse = customApiKey || headerKey || process.env.GEMINI_API_KEY || '';
+
+    const extractor = new AiDispatchExtractorService(keyToUse);
     const resultado = await extractor.extrairSolicitacaoCorrida({
       tipo: tipo || 'TEXTO_LIVRE',
       conteudo,

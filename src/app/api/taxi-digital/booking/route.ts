@@ -33,6 +33,18 @@ const MAPA_CONTRATOS: Record<string, ContratoConfig> = {
     authorizedId: '6989e993-022a-468f-b6b6-609b455d7102',
     userEmail: 'contato@taxidoispontozero.com.br',
   },
+  'heineken-voll': {
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
+    contractNumber: '55000',
+    authorizedId: '6989e993-022a-468f-b6b6-609b455d7102',
+    userEmail: 'contato@taxidoispontozero.com.br',
+  },
+  'padrao-b2b': {
+    uiCliente: '75d024b7-91dc-4582-ba5a-ab4c916ee953',
+    contractNumber: '55000',
+    authorizedId: '6989e993-022a-468f-b6b6-609b455d7102',
+    userEmail: 'contato@taxidoispontozero.com.br',
+  },
 };
 
 function limparEnderecoParaGeocode(endereco: string): string {
@@ -234,8 +246,17 @@ export async function POST(req: NextRequest) {
     const matchNumero = (origem || '').match(/,\s*(\d+)/) || (origem || '').match(/\bN[º°]?\s*(\d+)/i);
     const numeroOrigem = matchNumero ? matchNumero[1] : '';
 
-    // 6. Montar classificadores estruturados dinâmicos para a API Táxi Digital (campos 1 a 20)
+    // 6. Montar classificadores estruturados dinâmicos para a API Táxi Digital (campos 0 a 20)
     const classificatorsArray: Array<{ field: number; field_value: string; field_id?: number }> = [];
+
+    // Classificador 0: NOME oficial do passageiro/solicitante exigido na central
+    const nomeClassificador = (classificadores.nomeSolicitante || passageiroNome || '').trim();
+    if (nomeClassificador) {
+      classificatorsArray.push({
+        field: 0,
+        field_value: nomeClassificador,
+      });
+    }
 
     for (let i = 1; i <= 20; i++) {
       const chave = `classificador${i}` as keyof typeof classificadores;

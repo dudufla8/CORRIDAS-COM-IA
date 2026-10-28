@@ -13,9 +13,10 @@ DIRETRIZES DE EXTRAÇÃO:
    - "UNIPAR DIRETO": Solicitações diretas por e-mail de colaboradores da Unipar (ex: Solange Olivieri <solange.olivieri@unipar.com>), mencionando "UNIPAR CARBOCLORO", centro de custo "10300020", traslados diretos, anexo de bilhete aéreo/voo e sem menção a Voll (#UNIPAR-M).
    - "UNIPAR VOLL": Chamados emitidos via plataforma Voll com código iniciando em "#UNIPAR-M".
    - "CLARO VOLL": Chamados da Claro/Embratel com código iniciando em "#CLARO-M".
-   - "VOLL": Chamados Itaú/Voll (#ITAU-M).
+   - "HEINEKEN VOLL": Chamados da Heineken/Voll com código iniciando em "#HNK-M" ou com menção a "UN ITU / CORPORATIVO".
+   - "VOLL": Chamados Itaú/Voll (#ITAU-M) ou outras reservas Voll.
 5. CLASSIFICADORES & CÓDIGO DO AGENDAMENTO (REGRA CRÍTICA):
-   - "codigoOsChamado": O código do chamado (#CLARO-M..., #UNIPAR-M...). Em e-mails da UNIPAR DIRETO com anexo de bilhete aéreo, extraia o localizador do voo (ex: "EMEABB") ou número do bilhete.
+   - "codigoOsChamado": O código do chamado (#CLARO-M..., #UNIPAR-M..., #HNK-M...). Em e-mails da UNIPAR DIRETO com anexo de bilhete aéreo, extraia o localizador do voo (ex: "EMEABB") ou número do bilhete.
    - "centroCusto": Preencha SOMENTE se houver uma indicação clara de centro de custo ("Centro de Custo:", "CC:", "10300020"). Se não houver, deixe string vazia "". NUNCA coloque o código da OS como centro de custo.
    - "solicitante": Nome de quem enviou o e-mail (ex: "Solange Cristina Olivieri").
 6. SAÍDA OBRIGATÓRIA: Responda SOMENTE um JSON válido com a seguinte estrutura:
@@ -72,9 +73,9 @@ export class AiDispatchExtractorService {
   private apiKey: string;
   private provider: 'GEMINI' | 'OPENAI';
 
-  constructor() {
-    this.apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || '';
-    this.provider = process.env.GEMINI_API_KEY ? 'GEMINI' : 'OPENAI';
+  constructor(customKey?: string) {
+    this.apiKey = (customKey || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || '').trim();
+    this.provider = (this.apiKey.startsWith('AIza') || !process.env.OPENAI_API_KEY) ? 'GEMINI' : 'OPENAI';
   }
 
   async extrairSolicitacaoCorrida(input: ExtractionInput): Promise<RideExtractionData> {
@@ -83,7 +84,13 @@ export class AiDispatchExtractorService {
     const isApiKeyValida = Boolean(this.apiKey && !this.apiKey.includes('...') && this.apiKey.length >= 25);
 
     if (!isApiKeyValida) {
-      console.warn('[AI Extractor] GEMINI_API_KEY não configurada ou placeholder. Utilizando motor semântico heurístico local.');
+      if (input.tipo === 'IMAGEM_BASE64') {
+        throw new Error(
+          'Para ler capturas de tela e prints com IA Multimodal, configure sua chave do Google Gemini (GEMINI_API_KEY). ' +
+          'Clique no botão "🔑 Chave Gemini" no cabeçalho para inserir sua chave ou configure-a nas Variáveis de Ambiente da Vercel.'
+        );
+      }
+      console.warn('[AI Extractor] Chave de IA não configurada. Utilizando motor semântico heurístico local para texto.');
       const resLocal = this.extrairModoDesenvolvimento(input, dataRef);
       return this.sanitizarDadosExtraidos(resLocal);
     }
@@ -97,7 +104,11 @@ export class AiDispatchExtractorService {
       }
       return this.sanitizarDadosExtraidos(resultado);
     } catch (error: any) {
-      console.warn('[AI Extractor] Falha na API remota de IA. Ativando fallback semântico local:', error.message);
+      if (input.tipo === 'IMAGEM_BASE64') {
+        console.error('[AI Extractor Multimodal Error]', error.message);
+        throw new Error(`Falha da IA ao processar print/imagem: ${error.message || 'Erro de comunicação'}. Verifique se a chave do Gemini é válida e possui cota.`);
+      }
+      console.warn('[AI Extractor] Falha na API remota para texto. Ativando fallback local:', error.message);
       const resLocal = this.extrairModoDesenvolvimento(input, dataRef);
       return this.sanitizarDadosExtraidos(resLocal);
     }
@@ -306,20 +317,18 @@ export class AiDispatchExtractorService {
       nomePassageiro = matchTraslado[1].trim();
     } else if (/marcelo\s*terra\s*white/i.test(text)) {
       nomePassageiro = 'Marcelo Terra White';
-    } else {
-      nomePassageiro = 'Marcelo Terra White';
     }
 
     // 4. Telefones
-    let telPassageiro = '(13) 99127-8695';
-    const matchTel = text.match(/(?:Marcelo|passageiro|contato)?\s*[-:]?\s*\(?(\d{2})\)?\s*(9?\d{4})[-\s]?(\d{4})/i);
+    let telPassageiro = '';
+    const matchTel = text.match(/(?:telefone|contato|celular|tel)?\s*[-:]?\s*\(?(\d{2})\)?\s*(9?\d{4})[-\s]?(\d{4})/i);
     if (matchTel) {
       telPassageiro = `(${matchTel[1]}) ${matchTel[2]}-${matchTel[3]}`;
     }
 
     // 5. Origem e Destino
-    let enderecoOrigem = 'Rua Rodrigo Silva 228, casa 07, Macuco, em Santos';
-    let enderecoDestino = 'Aeroporto de Congonhas, em São Paulo';
+    let enderecoOrigem = '';
+    let enderecoDestino = '';
 
     const matchOrigem = text.match(/(?:residência,?\s*localizada\s*na|partida|origem:?)\s*([^,\.]+,\s*[^,\.]+,\s*[^,\.]+,\s*em\s*[^,\.]+?)(?:\s*para levá-lo|\.|\n|$)/i);
     if (matchOrigem) {
@@ -332,7 +341,7 @@ export class AiDispatchExtractorService {
     }
 
     // 6. Centro de Custo e Código/Voucher
-    let centroCusto = '10300020';
+    let centroCusto = '';
     const matchCc = text.match(/centro de custo\s*[:\s]*([0-9A-Za-z\-_]+)/i);
     if (matchCc) {
       centroCusto = matchCc[1].trim();
@@ -348,9 +357,13 @@ export class AiDispatchExtractorService {
     }
 
     // 7. Empresa
-    let empresa = 'UNIPAR DIRETO';
-    if (/claro/i.test(text)) empresa = 'CLARO VOLL';
+    let empresa = 'CONTRATO PADRÃO';
+    if (/hnk|heineken|itu/i.test(text)) empresa = 'HEINEKEN VOLL';
+    else if (/claro/i.test(text)) empresa = 'CLARO VOLL';
     else if (/#unipar-m/i.test(text)) empresa = 'UNIPAR VOLL';
+    else if (/unipar/i.test(text)) empresa = 'UNIPAR DIRETO';
+
+    const temDadosPrincipais = Boolean(nomePassageiro && (enderecoOrigem || codigoOs));
 
     return {
       empresaIdentificada: empresa,
@@ -359,7 +372,6 @@ export class AiDispatchExtractorService {
         nome: nomePassageiro,
         telefone: telPassageiro,
         identificador: '',
-        email: 'marcelo.white@unipar.com',
       },
       agendamento: {
         tipoAgendamento: 'AGENDADO',
@@ -369,27 +381,29 @@ export class AiDispatchExtractorService {
       },
       origem: {
         enderecoCompleto: enderecoOrigem,
-        logradouro: 'Rua Rodrigo Silva',
-        numero: '228',
-        bairro: 'Macuco',
-        cidade: 'Santos',
-        uf: 'SP',
+        logradouro: enderecoOrigem,
+        numero: '',
+        bairro: '',
+        cidade: '',
+        uf: '',
       },
       destino: {
         enderecoCompleto: enderecoDestino,
-        logradouro: 'Aeroporto de Congonhas',
-        cidade: 'São Paulo',
-        uf: 'SP',
+        logradouro: enderecoDestino,
+        numero: '',
+        bairro: '',
+        cidade: '',
+        uf: '',
       },
       classificadores: {
-        codigoOsChamado: codigoOs || 'EMEABB',
+        codigoOsChamado: codigoOs,
         centroCusto: centroCusto,
-        projeto: 'UNIPAR CARBOCLORO',
-        solicitante: 'Solange Cristina Olivieri',
+        projeto: '',
+        solicitante: '',
       },
-      observacoesOperacionais: 'Voo GOL 1626 CGH-SSA (Bilhete: 1272314398705). Solange: 13 991724867.',
-      scoreConfianca: 0.98,
-      avisosOuInconsistencias: [],
+      observacoesOperacionais: '',
+      scoreConfianca: temDadosPrincipais ? 0.75 : 0.35,
+      avisosOuInconsistencias: temDadosPrincipais ? [] : ['Poucos dados identificados no modo heurístico de texto livre.'],
     };
   }
 }
