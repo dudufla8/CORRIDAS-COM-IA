@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     }
 
     const headerKey = req.headers.get('x-gemini-key') || '';
-    const keyToUse = customApiKey || headerKey || process.env.GEMINI_API_KEY || '';
+    const keyToUse = process.env.GEMINI_API_KEY || customApiKey || headerKey || '';
 
     const extractor = new AiDispatchExtractorService(keyToUse);
     const resultado = await extractor.extrairSolicitacaoCorrida({

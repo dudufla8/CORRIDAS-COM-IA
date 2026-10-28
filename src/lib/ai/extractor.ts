@@ -161,20 +161,17 @@ export class AiDispatchExtractorService {
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
     const configuredModel = process.env.GEMINI_MODEL;
+    // O modelo gemini-1.5-flash é o mais estável, rápido e com cota universal ativa na Google AI
     const models = Array.from(new Set([
       configuredModel,
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
       'gemini-1.5-flash',
-      'gemini-1.5-pro'
+      'gemini-1.5-pro',
+      'gemini-2.5-flash',
     ].filter(Boolean))) as string[];
 
     let lastError: any = null;
 
-    // Tenta no máximo os 2 primeiros modelos para não estourar tempo de resposta
-    const modelosParaTestar = models.slice(0, 2);
-
-    for (const model of modelosParaTestar) {
+    for (const model of models) {
       try {
         return await this.executarChamadaGemini(input, dataRef, model);
       } catch (err: any) {
