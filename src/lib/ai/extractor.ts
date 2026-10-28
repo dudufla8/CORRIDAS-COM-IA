@@ -149,24 +149,21 @@ export class AiDispatchExtractorService {
   }
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
-    let configuredModel = process.env.GEMINI_MODEL;
-    // Se o modelo configurado for de versão antiga ou descontinuada, prioriza gemini-3.5-flash
-    if (configuredModel && (configuredModel.includes('1.5') || configuredModel.includes('2.5-flash'))) {
-      configuredModel = undefined;
-    }
-
+    const configuredModel = process.env.GEMINI_MODEL;
     const models = Array.from(new Set([
       configuredModel,
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-flash-lite-latest',
-      'gemini-3.8-flash',
-      'gemini-flash-latest'
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
     ].filter(Boolean))) as string[];
 
     let lastError: any = null;
 
-    for (const model of models) {
+    // Tenta no máximo os 2 primeiros modelos para não estourar tempo de resposta
+    const modelosParaTestar = models.slice(0, 2);
+
+    for (const model of modelosParaTestar) {
       try {
         return await this.executarChamadaGemini(input, dataRef, model);
       } catch (err: any) {
@@ -206,7 +203,7 @@ export class AiDispatchExtractorService {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 18000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     try {
       const response = await fetch(endpoint, {

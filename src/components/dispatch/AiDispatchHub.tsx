@@ -22,11 +22,26 @@ import {
   Check,
   Copy,
   Share2,
+  Clipboard,
+  Trash2,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { RideExtractionData } from '../../lib/ai/schema';
 import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } from '../../lib/rules/classifier-engine';
 import { TaxiDigitalApiClient } from '../../lib/taxi-digital/client';
 import { ClassificationRuleValidator } from './ClassificationRuleValidator';
+
+const MiniMapaRota = dynamic(
+  () => import('./MiniMapaRota').then((mod) => mod.MiniMapaRota),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-48 sm:h-56 w-full rounded-xl border border-slate-200 bg-slate-100 animate-pulse flex items-center justify-center text-xs text-slate-400">
+        Carregando mapa Leaflet...
+      </div>
+    ),
+  }
+);
 
 export interface CategoriaTaxiDigital {
   id: string;
@@ -320,6 +335,9 @@ export const AiDispatchHub: React.FC = () => {
   const [resultadoDespacho, setResultadoDespacho] = useState<DetalhesDespachoSucesso | null>(null);
   const [copiadoVoucher, setCopiadoVoucher] = useState(false);
   const [copiadoTextoCompleto, setCopiadoTextoCompleto] = useState(false);
+  const [origemCoords, setOrigemCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [destinoCoords, setDestinoCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [colandoClipboard, setColandoClipboard] = useState(false);
 
   const taxiClientRef = useRef(new TaxiDigitalApiClient());
 
@@ -386,12 +404,68 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     setEstimativa(null);
     setCategoriasDisponiveis([]);
     setCategoriaSelecionadaId('');
+    setOrigemCoords(null);
+    setDestinoCoords(null);
   };
 
   const handleAlterarValorClassificador = (campo: string, valor: string) => {
     setValoresManuais((prev) => ({ ...prev, [campo]: valor }));
     if (campo === 'nomeSolicitante') {
       setFormPassageiro((prev) => ({ ...prev, nome: valor }));
+    }
+  };
+
+  const carregarImagemEProcessar = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target?.result as string;
+      setImagePreview(base64);
+      setActiveTab('PRINT');
+      processarExtracaoImagem(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // CLIPBOARD AUTOMÁTICO (MOBILE & DESKTOP COM 1 TOQUE)
+  const handlePasteFromClipboard = async () => {
+    try {
+      if (!navigator.clipboard) {
+        alert('Seu navegador não suporta leitura direta da área de transferência.');
+        return;
+      }
+
+      // 1. Tentar ler como itens binários (Imagens copiadas no celular/desktop)
+      if (navigator.clipboard.read) {
+        try {
+          const clipboardItems = await navigator.clipboard.read();
+          for (const item of clipboardItems) {
+            const imageType = item.types.find((type) => type.startsWith('image/'));
+            if (imageType) {
+              const blob = await item.getType(imageType);
+              const file = new File([blob], 'clipboard-image.png', { type: imageType });
+
+              // Carrega no preview e dispara extração IA
+              carregarImagemEProcessar(file);
+              return;
+            }
+          }
+        } catch (binErr) {
+          console.warn('Permissão de leitura de binário do clipboard não concedida, tentando texto:', binErr);
+        }
+      }
+
+      // 2. Fallback: Se for texto copiado (ex: mensagem de WhatsApp com dados da corrida)
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim().length > 0) {
+        setActiveTab('TEXTO');
+        setTextInput(text);
+        processarExtracaoTextoComConteudo(text);
+      } else {
+        alert('Nenhuma imagem ou texto encontrado na área de transferência.');
+      }
+    } catch (err) {
+      console.warn('Permissão de clipboard negada ou falha ao ler:', err);
+      alert('Dê permissão para colar ou use o comando de colar diretamente no campo.');
     }
   };
 
@@ -407,13 +481,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
           const file = item.getAsFile();
           if (file) {
             event.preventDefault();
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              const base64 = e.target?.result as string;
-              setImagePreview(base64);
-              setActiveTab('PRINT');
-            };
-            reader.readAsDataURL(file);
+            carregarImagemEProcessar(file);
             break;
           }
         }
@@ -424,15 +492,24 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     return () => window.removeEventListener('paste', handlePaste);
   }, []);
 
+  // ATALHO DE TECLADO: CTRL + ENTER PARA DISPARAR AGENDAMENTO
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        if (resultadoRules.podeDespachar && !despachando) {
+          handleDespacharCorrida();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [resultadoRules.podeDespachar, despachando]);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const base64 = ev.target?.result as string;
-        setImagePreview(base64);
-      };
-      reader.readAsDataURL(file);
+      carregarImagemEProcessar(file);
     }
   };
 
@@ -478,7 +555,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     setResultadoDespacho(null);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), 40000);
 
     try {
       const base64Otimizado = await otimizarPrintBase64(base64);
@@ -502,7 +579,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     } catch (err: any) {
       console.error('Erro na extração de imagem:', err);
       if (err.name === 'AbortError') {
-        alert('Tempo limite de 30s excedido ao processar print com IA. Tente novamente ou use a aba de texto.');
+        alert('Tempo limite excedido ao processar print com IA. O sistema usará os dados inseridos ou você pode tentar novamente.');
       } else {
         alert('Aviso da IA: ' + (err.message || 'Falha ao processar o print. Verifique a chave GEMINI_API_KEY.'));
       }
@@ -512,13 +589,13 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     }
   };
 
-  const processarExtracaoTexto = async () => {
-    if (!textInput.trim()) return;
+  const processarExtracaoTextoComConteudo = async (conteudoTexto: string) => {
+    if (!conteudoTexto.trim()) return;
     setIsProcessingAi(true);
     setResultadoDespacho(null);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), 40000);
 
     try {
       const response = await fetch('/api/ai/extract', {
@@ -526,7 +603,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tipo: 'TEXTO_LIVRE',
-          conteudo: textInput,
+          conteudo: conteudoTexto,
         }),
         signal: controller.signal,
       });
@@ -541,7 +618,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     } catch (err: any) {
       console.error('Erro na extração de texto:', err);
       if (err.name === 'AbortError') {
-        alert('Tempo limite de 30s excedido ao processar texto.');
+        alert('Tempo limite excedido ao processar texto.');
       } else {
         alert('Aviso da IA: ' + (err.message || 'Falha ao processar o texto.'));
       }
@@ -549,6 +626,10 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       clearTimeout(timeoutId);
       setIsProcessingAi(false);
     }
+  };
+
+  const processarExtracaoTexto = () => {
+    processarExtracaoTextoComConteudo(textInput);
   };
 
   const aplicarDadosExtraidos = (dados: RideExtractionData) => {
@@ -716,6 +797,13 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       });
 
       const resJson = await res.json().catch(() => ({}));
+      if (resJson.origemCoords) {
+        setOrigemCoords(resJson.origemCoords);
+      }
+      if (resJson.destinoCoords) {
+        setDestinoCoords(resJson.destinoCoords);
+      }
+
       if (resJson.status && resJson.categories && resJson.categories.length > 0) {
         setCategoriasDisponiveis(resJson.categories);
 
@@ -823,7 +911,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased">
       {/* 1. TOPBAR PROFISSIONAL FIXA DE PONTA A PONTA */}
       <header className="sticky top-0 z-40 w-full bg-white border-b border-slate-200 shadow-2xs">
-        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="w-full max-w-[1520px] mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
           {/* Logo e Nome da Aplicação */}
           <div className="flex items-center gap-3">
             <div className="relative h-10 w-28 sm:w-32 flex items-center">
@@ -843,19 +931,24 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
             </div>
           </div>
 
-          {/* Status da Conexão Táxi Digital */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-xs font-medium text-slate-700">
+          {/* À direita: atalhos rápidos ou botão de status da fila de agendamentos */}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleNovoAgendamento}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Iniciar novo agendamento e limpar formulário"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
+              <span className="hidden sm:inline">Novo Agendamento</span>
+            </button>
+
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-medium text-emerald-800">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span>APITD v3 Conectado</span>
-            </div>
-
-            <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-600 font-medium">
-              <ShieldCheck className="w-4 h-4 text-slate-500" />
-              <span>Central Táxi 2.0</span>
+              <span className="font-semibold">Fila de Agendamentos: Ativa</span>
             </div>
           </div>
         </div>
@@ -1013,7 +1106,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
 
       {/* BANNER PERSISTENTE DE STATUS NO TOPO */}
       {resultadoDespacho && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6">
+        <div className="max-w-[1520px] mx-auto px-4 md:px-6 pt-5">
           <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-950 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-md bg-emerald-600 text-white flex items-center justify-center font-bold flex-shrink-0">
@@ -1047,32 +1140,36 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
         </div>
       )}
 
-      {/* ÁREA PRINCIPAL */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* ÁREA PRINCIPAL FULL-WIDTH FLUIDA */}
+      <main className="max-w-[1520px] mx-auto px-4 md:px-6 py-5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           
-          {/* COLUNA ESQUERDA: INGESTÃO DE PRINT / TEXTO E ESTIMATIVA (5 colunas) */}
-          <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-20">
+          {/* COLUNA ESQUERDA: INGESTÃO & FEEDBACK (5 colunas) */}
+          <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-20">
             
-            {/* Card de Upload / Dropzone */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4">
+            {/* Card de Ingestão de Chamados */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-sm space-y-3.5">
+              
+              {/* Abas [Print / Imagem] e [Texto Livre] */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="bg-slate-100 p-1 rounded-lg border border-slate-200/60 inline-flex items-center gap-1">
                   <button
+                    type="button"
                     onClick={() => setActiveTab('PRINT')}
-                    className={`px-3.5 py-1.5 rounded-md text-xs transition-all ${
+                    className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer ${
                       activeTab === 'PRINT'
-                        ? 'bg-white shadow-sm font-semibold text-slate-800'
+                        ? 'bg-white shadow-2xs font-semibold text-slate-900'
                         : 'text-slate-500 hover:text-slate-700 font-medium'
                     }`}
                   >
                     Print / Imagem
                   </button>
                   <button
+                    type="button"
                     onClick={() => setActiveTab('TEXTO')}
-                    className={`px-3.5 py-1.5 rounded-md text-xs transition-all ${
+                    className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer ${
                       activeTab === 'TEXTO'
-                        ? 'bg-white shadow-sm font-semibold text-slate-800'
+                        ? 'bg-white shadow-2xs font-semibold text-slate-900'
                         : 'text-slate-500 hover:text-slate-700 font-medium'
                     }`}
                   >
@@ -1086,6 +1183,17 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                 </span>
               </div>
 
+              {/* BOTÃO DE AÇÃO RÁPIDA: "📋 Colar da Área de Transferência" (Destaque para Mobile e Desktop) */}
+              <button
+                type="button"
+                onClick={handlePasteFromClipboard}
+                disabled={isProcessingAi || colandoClipboard}
+                className="w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white font-semibold text-xs rounded-lg shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Clipboard className="w-4 h-4" />
+                <span>{colandoClipboard ? 'Lendo Clipboard...' : '📋 Colar da Área de Transferência'}</span>
+              </button>
+
               {/* ABA PRINT / DROPZONE COMPACTA */}
               {activeTab === 'PRINT' && (
                 <div className="space-y-3">
@@ -1095,27 +1203,43 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={imagePreview}
-                          alt="Screenshot"
-                          className="w-full max-h-72 object-contain mx-auto"
+                          alt="Screenshot do Chamado"
+                          className="w-full max-h-64 object-contain mx-auto"
                         />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setImagePreview(null);
-                            setExtractedData(null);
-                          }}
-                          className="absolute top-2 right-2 px-2.5 py-1 text-xs font-medium bg-slate-900/80 hover:bg-slate-900 text-white rounded-md shadow-sm transition-colors flex items-center gap-1"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          Substituir imagem
-                        </button>
+                        <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                          <label
+                            className="px-2.5 py-1 text-xs font-medium bg-slate-900/80 hover:bg-slate-900 text-white rounded-md shadow-sm transition-colors flex items-center gap-1 cursor-pointer"
+                            title="Substituir por outra imagem"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Substituir</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleFileUpload}
+                              className="hidden"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setImagePreview(null);
+                              setExtractedData(null);
+                            }}
+                            className="px-2.5 py-1 text-xs font-medium bg-red-600/80 hover:bg-red-700 text-white rounded-md shadow-sm transition-colors flex items-center gap-1 cursor-pointer"
+                            title="Excluir imagem"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Excluir</span>
+                          </button>
+                        </div>
                       </div>
 
                       <button
                         type="button"
                         disabled={isProcessingAi}
                         onClick={() => processarExtracaoImagem(imagePreview)}
-                        className="w-full h-10 px-4 rounded-md bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                        className="w-full h-10 px-4 rounded-md bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                       >
                         {isProcessingAi ? (
                           <>
@@ -1125,29 +1249,29 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                         ) : (
                           <>
                             <Sparkles className="w-4 h-4" />
-                            <span>Analisar com IA</span>
+                            <span>Processar com IA</span>
                           </>
                         )}
                       </button>
                     </div>
                   ) : (
-                    <div className="relative border border-dashed border-slate-300 hover:border-slate-400 rounded-lg p-8 text-center bg-slate-50/60 hover:bg-slate-50 transition-colors cursor-pointer">
+                    <div className="relative border border-dashed border-slate-300 hover:border-slate-400 rounded-lg p-6 text-center bg-slate-50/60 hover:bg-slate-50 transition-colors cursor-pointer">
                       <input
                         type="file"
                         accept="image/*"
                         onChange={handleFileUpload}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
-                      <div className="space-y-3 pointer-events-none">
-                        <div className="w-10 h-10 rounded-md bg-slate-200/80 text-slate-700 mx-auto flex items-center justify-center">
-                          <Camera className="w-5 h-5" />
+                      <div className="space-y-2 pointer-events-none">
+                        <div className="w-9 h-9 rounded-md bg-slate-200/80 text-slate-700 mx-auto flex items-center justify-center">
+                          <Camera className="w-4 h-4" />
                         </div>
                         <div>
                           <p className="text-xs font-medium text-slate-800">
-                            Pressione <kbd className="px-1.5 py-0.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded shadow-2xs">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded shadow-2xs">V</kbd> para colar o print
+                            Pressione <kbd className="px-1.5 py-0.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded shadow-2xs">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded shadow-2xs">V</kbd> ou toque no botão colar
                           </p>
-                          <p className="text-[11px] text-slate-500 mt-1">
-                            ou clique para selecionar um arquivo de imagem
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            ou clique para selecionar um arquivo de print
                           </p>
                         </div>
                       </div>
@@ -1163,13 +1287,13 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                     rows={4}
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
-                    placeholder="Cole ou digite a mensagem do chamado corporativo..."
-                    className="w-full p-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none resize-none font-normal"
+                    placeholder="Cole ou digite a mensagem de WhatsApp, e-mail ou chamado corporativo..."
+                    className="w-full p-2.5 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none resize-none font-normal"
                   />
                   <button
                     disabled={isProcessingAi || !textInput.trim()}
                     onClick={processarExtracaoTexto}
-                    className="w-full h-10 flex items-center justify-center gap-2 px-4 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                    className="w-full h-10 flex items-center justify-center gap-2 px-4 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {isProcessingAi ? (
                       <>
@@ -1179,7 +1303,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                     ) : (
                       <>
                         <Sparkles className="w-4 h-4" />
-                        <span>Analisar com IA</span>
+                        <span>Processar com IA</span>
                       </>
                     )}
                   </button>
@@ -1187,7 +1311,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
               )}
 
               {extractedData && (
-                <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
                   <span className="font-medium text-slate-700 flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
                     Índice de Confiança da IA
@@ -1199,8 +1323,8 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
               )}
             </div>
 
-            {/* Card de Estimativa e Viabilidade */}
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm space-y-4">
+            {/* Card de Estimativa de Rota Táxi Digital */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-sm space-y-3.5">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                   <Car className="w-4 h-4 text-slate-700" />
@@ -1217,36 +1341,36 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
               </div>
 
               {estimativa ? (
-                <div className="space-y-3.5">
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2 bg-slate-50 rounded-lg border border-slate-200 text-center">
                       <div className="text-[10px] uppercase font-semibold text-slate-500">Distância</div>
                       <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.km} km</div>
                     </div>
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-center">
+                    <div className="p-2 bg-slate-50 rounded-lg border border-slate-200 text-center">
                       <div className="text-[10px] uppercase font-semibold text-slate-500">Tempo</div>
                       <div className="text-sm font-bold text-slate-900 mt-0.5">{estimativa.minutos} min</div>
                     </div>
-                    <div className="p-2.5 bg-blue-50/60 rounded-lg border border-blue-200 text-center">
+                    <div className="p-2 bg-blue-50/60 rounded-lg border border-blue-200 text-center">
                       <div className="text-[10px] uppercase font-semibold text-blue-700">Tarifa Prevista</div>
                       <div className="text-sm font-bold text-blue-900 mt-0.5">R$ {estimativa.valor.toFixed(2)}</div>
                     </div>
                   </div>
 
-                  {/* LISTA DE CATEGORIAS DA TÁXI DIGITAL */}
+                  {/* Categorias ativas */}
                   {categoriasDisponiveis.length > 0 && (
-                    <div className="pt-3 border-t border-slate-100 space-y-2">
+                    <div className="pt-2.5 border-t border-slate-100 space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1">
                           <Car className="w-3.5 h-3.5 text-blue-600" />
-                          Categoria do Táxi
+                          Categoria Ativa
                         </span>
-                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                          {categoriasDisponiveis.length} {categoriasDisponiveis.length === 1 ? 'categoria ativa' : 'categorias ativas'}
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                          {categoriasDisponiveis.length} {categoriasDisponiveis.length === 1 ? 'categoria' : 'categorias'}
                         </span>
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div className="space-y-1">
                         {categoriasDisponiveis.map((cat) => {
                           const isSelected = cat.id === categoriaSelecionadaId;
                           return (
@@ -1254,9 +1378,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                               key={cat.id}
                               type="button"
                               onClick={() => handleSelecionarCategoria(cat)}
-                              className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-center justify-between cursor-pointer ${
+                              className={`w-full p-2 rounded-lg border text-left transition-all flex items-center justify-between cursor-pointer ${
                                 isSelected
-                                  ? 'border-blue-600 bg-blue-50/70 shadow-2xs ring-1 ring-blue-600'
+                                  ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-600'
                                   : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100 hover:border-slate-300'
                               }`}
                             >
@@ -1266,13 +1390,13 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                                     {cat.nome}
                                   </span>
                                   {isSelected && (
-                                    <span className="text-[9px] font-semibold text-blue-700 bg-blue-100/90 px-1.5 py-0.2 rounded">
+                                    <span className="text-[9px] font-semibold text-blue-700 bg-blue-100 px-1.5 py-0.2 rounded">
                                       Selecionada
                                     </span>
                                   )}
                                 </div>
                                 <div className="text-[10px] text-slate-500">
-                                  {cat.precoFixo ? 'Preço Tabelado Fechado' : 'Taxímetro Estimado'} • Cód. {cat.id}
+                                  {cat.precoFixo ? 'Preço Fechado' : 'Taxímetro Estimado'} • Cód. {cat.id}
                                 </div>
                               </div>
 
@@ -1289,24 +1413,24 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                   )}
                 </div>
               ) : (
-                <div className="space-y-2.5">
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <div className="p-2.5 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
                       <div className="text-[10px] uppercase font-medium text-slate-400">Distância</div>
-                      <div className="text-sm font-semibold text-slate-400 mt-0.5">~ -- km</div>
+                      <div className="text-xs font-semibold text-slate-400 mt-0.5">~ -- km</div>
                     </div>
-                    <div className="p-2.5 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
+                    <div className="p-2 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
                       <div className="text-[10px] uppercase font-medium text-slate-400">Tempo</div>
-                      <div className="text-sm font-semibold text-slate-400 mt-0.5">~ -- min</div>
+                      <div className="text-xs font-semibold text-slate-400 mt-0.5">~ -- min</div>
                     </div>
-                    <div className="p-2.5 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
+                    <div className="p-2 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 text-center">
                       <div className="text-[10px] uppercase font-medium text-slate-400">Tarifa Prevista</div>
-                      <div className="text-sm font-semibold text-slate-400 mt-0.5">R$ --,--</div>
+                      <div className="text-xs font-semibold text-slate-400 mt-0.5">R$ --,--</div>
                     </div>
                   </div>
 
                   {erroEstimativa ? (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2">
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                       <div>
                         <div className="font-semibold text-amber-950">Aviso da Táxi Digital</div>
@@ -1321,234 +1445,234 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                 </div>
               )}
             </div>
+
+            {/* Mini Mapa Interativo (Leaflet) traçando a rota assim que os endereços forem extraídos pela IA */}
+            <div className="bg-white rounded-xl border border-slate-200/80 p-3.5 sm:p-4 shadow-sm space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Traçado da Rota no Mapa</span>
+                </h3>
+                <span className="text-[10px] text-slate-400 font-mono">Leaflet / OpenStreetMap</span>
+              </div>
+              <MiniMapaRota
+                origemCoords={origemCoords}
+                destinoCoords={destinoCoords}
+                origemTexto={formOrigem}
+                destinoTexto={formDestino}
+              />
+            </div>
+
           </div>
 
-          {/* COLUNA DIREITA: FORMULÁRIO OPERACIONAL E CLASSIFICADORES (7 colunas) */}
-          <div className="lg:col-span-7 space-y-5">
-            <div className="bg-white rounded-xl border border-slate-200/80 p-5 sm:p-6 shadow-sm space-y-6">
+          {/* COLUNA DIREITA: VALIDADOR OPERACIONAL (7 colunas) */}
+          <div className="lg:col-span-7 space-y-4">
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-sm space-y-4">
               
               {/* Header do Validador */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
                     Validador Operacional
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Conferência e preenchimento dos dados antes do envio
+                    Conferência e validação rápida antes do envio para a frota
                   </p>
                 </div>
 
                 {dadosAutorizado && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Autorizado: Ativo
                   </span>
                 )}
               </div>
 
-              {/* SELETOR DE CONTRATO B2B SÓBRIO COM CONTROLE MANUAL/AUTO */}
-              <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-slate-600" />
-                    Contrato Corporativo
-                  </label>
-                  <div className="flex items-center gap-2">
-                    {contratoModoManual ? (
-                      <span className="text-[10px] font-semibold text-slate-800 bg-slate-200/90 border border-slate-300 px-2 py-0.5 rounded flex items-center gap-1 shadow-2xs">
-                        Manual (Fixado por Você)
-                      </span>
-                    ) : contratoAutoDetectado ? (
-                      <span className="text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
-                        Identificado pela IA
-                      </span>
-                    ) : (
-                      <span className="bg-slate-100 text-slate-600 font-mono text-xs px-2 py-0.5 rounded border border-slate-200/60">
-                        {contratoAtual.uiCliente}
-                      </span>
-                    )}
-
-                    {contratoModoManual && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setContratoModoManual(false);
-                          contratoModoManualRef.current = false;
-                        }}
-                        className="text-[10px] text-blue-600 hover:text-blue-800 underline font-medium cursor-pointer"
-                        title="Permitir que a IA altere o contrato na próxima extração"
-                      >
-                        Ativar Auto IA
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <select
-                  value={contratoSelecionadoId}
-                  onChange={(e) => {
-                    const novoId = e.target.value;
-                    setContratoSelecionadoId(novoId);
-                    setContratoModoManual(true);
-                    contratoModoManualRef.current = true;
-                    setContratoAutoDetectado(false);
-                    adaptarClassificadoresParaContrato(novoId);
-                    calcularEstimativaRota(undefined, undefined, novoId);
-                  }}
-                  className="w-full h-10 px-3 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none shadow-2xs cursor-pointer"
-                >
-                  {CONTRATOS_DISPONIVEIS.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nomeExibicao}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* DADOS DO PASSAGEIRO */}
-              <div className="space-y-3">
-                <h4 className="text-xs uppercase font-semibold text-slate-500 tracking-wider flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-slate-400" />
-                  Dados do Passageiro
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-xs font-medium text-slate-700">Nome Completo</label>
-                    <input
-                      type="text"
-                      value={formPassageiro.nome}
-                      placeholder="Nome do colaborador"
+              {/* LINHA 1: Contrato Corporativo (dropdown) + Tipo de Chamada + Data e Horário em grade horizontal única */}
+              <div className="p-3 rounded-lg bg-slate-50/80 border border-slate-200/90">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-2.5">
+                  {/* Contrato Corporativo (5 colunas) */}
+                  <div className="md:col-span-5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                        <Building2 className="w-3 h-3 text-slate-500" />
+                        <span>Contrato Corporativo</span>
+                      </label>
+                      <div className="flex items-center gap-1">
+                        {contratoModoManual ? (
+                          <span className="text-[9px] font-semibold text-slate-700 bg-slate-200 border border-slate-300 px-1 py-0.2 rounded">
+                            Manual
+                          </span>
+                        ) : contratoAutoDetectado ? (
+                          <span className="text-[9px] font-medium text-blue-700 bg-blue-50 border border-blue-200 px-1 py-0.2 rounded">
+                            IA Auto
+                          </span>
+                        ) : null}
+                        {contratoModoManual && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setContratoModoManual(false);
+                              contratoModoManualRef.current = false;
+                            }}
+                            className="text-[9px] text-blue-600 hover:text-blue-800 underline font-medium cursor-pointer"
+                            title="Ativar detecção inteligente por IA"
+                          >
+                            Auto IA
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <select
+                      value={contratoSelecionadoId}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        setFormPassageiro((prev) => ({ ...prev, nome: val }));
-                        setValoresManuais((prev) => ({ ...prev, nomeSolicitante: val }));
+                        const novoId = e.target.value;
+                        setContratoSelecionadoId(novoId);
+                        setContratoModoManual(true);
+                        contratoModoManualRef.current = true;
+                        setContratoAutoDetectado(false);
+                        adaptarClassificadoresParaContrato(novoId);
+                        calcularEstimativaRota(undefined, undefined, novoId);
                       }}
-                      className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900"
-                    />
+                      className="w-full h-8 px-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none cursor-pointer"
+                    >
+                      {CONTRATOS_DISPONIVEIS.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nomeExibicao}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-700">Telefone / WhatsApp</label>
-                    <input
-                      type="text"
-                      value={formPassageiro.telefone}
-                      placeholder="(00) 00000-0000"
-                      onChange={(e) => setFormPassageiro((prev) => ({ ...prev, telefone: e.target.value }))}
-                      className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900"
-                    />
-                  </div>
-                </div>
-              </div>
 
-              {/* DATA E HORÁRIO */}
-              <div className="space-y-3">
-                <h4 className="text-xs uppercase font-semibold text-slate-500 tracking-wider flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  Data e Horário
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-700">Tipo de Chamada</label>
+                  {/* Tipo de Chamada (3 colunas) */}
+                  <div className="md:col-span-3 space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700 block">Tipo</label>
                     <select
                       value={formViagem.tipo}
                       onChange={(e) => setFormViagem({ ...formViagem, tipo: e.target.value as any })}
-                      className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none bg-white text-slate-900 cursor-pointer"
+                      className="w-full h-8 px-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none cursor-pointer"
                     >
                       <option value="AGENDADO">Agendada (Futura)</option>
                       <option value="IMEDIATO">Imediata (Agora)</option>
                     </select>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-700">Data</label>
+                  {/* Data (2 colunas) */}
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700 block">Data</label>
                     <input
                       type="date"
                       value={formViagem.data}
                       onChange={(e) => setFormViagem({ ...formViagem, data: e.target.value })}
-                      className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900"
+                      className="w-full h-8 px-1.5 text-xs rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none"
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-700">Horário</label>
+                  {/* Horário (2 colunas) */}
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700 block">Horário</label>
                     <input
                       type="time"
                       value={formViagem.hora}
                       onChange={(e) => setFormViagem({ ...formViagem, hora: e.target.value })}
-                      className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900"
+                      className="w-full h-8 px-1.5 text-xs rounded-md border border-slate-300 bg-white text-slate-900 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* TRAJETO COM TRAÇO VERTICAL (ESTILO UBER / GOOGLE MAPS) */}
-              <div className="space-y-3">
-                <h4 className="text-xs uppercase font-semibold text-slate-500 tracking-wider flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                  Trajeto da Corrida
-                </h4>
+              {/* LINHA 2: Nome Completo do Passageiro + Telefone / WhatsApp lado a lado (50% / 50%) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Nome Completo do Passageiro</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formPassageiro.nome}
+                    placeholder="Nome completo do passageiro..."
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormPassageiro((prev) => ({ ...prev, nome: val }));
+                      setValoresManuais((prev) => ({ ...prev, nomeSolicitante: val }));
+                    }}
+                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900"
+                  />
+                </div>
 
-                <div className="flex gap-3">
-                  {/* Traço Vertical com Pontos A e B */}
-                  <div className="flex flex-col items-center pt-8 pb-3">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-100 flex-shrink-0"></span>
-                    <span className="w-0.5 flex-1 bg-slate-200 my-1"></span>
-                    <span className="w-2.5 h-2.5 rounded-xs bg-slate-900 ring-4 ring-slate-100 flex-shrink-0"></span>
-                  </div>
-
-                  {/* Campos de Origem e Destino */}
-                  <div className="flex-1 space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-slate-700">Origem (Embarque)</label>
-                      <input
-                        type="text"
-                        value={formOrigem}
-                        placeholder="Endereço de partida..."
-                        onChange={(e) => setFormOrigem(e.target.value)}
-                        onBlur={() => calcularEstimativaRota()}
-                        className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900 font-normal"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-slate-700">Destino (Desembarque)</label>
-                      <input
-                        type="text"
-                        value={formDestino}
-                        placeholder="Endereço de destino..."
-                        onChange={(e) => setFormDestino(e.target.value)}
-                        onBlur={() => calcularEstimativaRota()}
-                        className="w-full h-10 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900 font-normal"
-                      />
-                    </div>
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <span>Telefone / WhatsApp</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formPassageiro.telefone}
+                    placeholder="(00) 00000-0000"
+                    onChange={(e) => setFormPassageiro((prev) => ({ ...prev, telefone: e.target.value }))}
+                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900"
+                  />
                 </div>
               </div>
 
-              {/* REGRAS DE FATURAMENTO E CLASSIFICADORES */}
+              {/* LINHA 3: Origem (Embarque) e Destino (Desembarque) em linha dupla compacta */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100 shrink-0"></span>
+                    <span>Origem (Embarque)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formOrigem}
+                    placeholder="Endereço de partida..."
+                    onChange={(e) => setFormOrigem(e.target.value)}
+                    onBlur={() => calcularEstimativaRota()}
+                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-slate-900 ring-2 ring-slate-100 shrink-0"></span>
+                    <span>Destino (Desembarque)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formDestino}
+                    placeholder="Endereço de destino..."
+                    onChange={(e) => setFormDestino(e.target.value)}
+                    onBlur={() => calcularEstimativaRota()}
+                    className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal"
+                  />
+                </div>
+              </div>
+
+              {/* LINHA 4: Card de Regras de Faturamento e Auditoria com os classificadores em grade de 2 colunas */}
               <ClassificationRuleValidator
                 resultado={resultadoRules}
                 valoresManuais={valoresManuais}
                 onAlterarValor={handleAlterarValorClassificador}
               />
 
-              {/* OBSERVAÇÕES OPERACIONAIS */}
+              {/* LINHA 5: Observações para a Frota em campo horizontal de altura reduzida */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                   <FileText className="w-3.5 h-3.5 text-slate-400" />
-                  Observações para a Frota
+                  <span>Observações para a Frota</span>
                 </label>
-                <textarea
-                  rows={2}
+                <input
+                  type="text"
                   value={formObservacoes}
-                  placeholder="Informações adicionais para o motorista (ex: portão de entrada, ferramentas)..."
+                  placeholder="Informações adicionais para o motorista (ex: portão de entrada, ferramentas, voo)..."
                   onChange={(e) => setFormObservacoes(e.target.value)}
-                  className="w-full p-2.5 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-100 outline-none text-slate-900 resize-none font-normal"
+                  className="w-full h-9 px-3 text-xs rounded-md border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-200 outline-none text-slate-900 font-normal"
                 />
               </div>
 
-              {/* 7. FOOTER STICKY: BARRA DE AÇÃO FIXA */}
-              <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs py-3.5 px-5 -mx-5 -mb-5 rounded-b-xl border-t border-slate-200 z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
-                <div className="text-xs text-slate-600 flex-1 min-w-0 pr-2">
+              {/* BOTÃO DE AÇÃO PRIMÁRIA FIXO NA BASE COM VISUAL DOMINANTE E SUPORTE A CTRL + ENTER */}
+              <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs py-3 px-4 -mx-4 -mb-4 sm:-mx-5 sm:-mb-5 rounded-b-xl border-t border-slate-200 z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+                <div className="text-xs text-slate-600 flex-1 min-w-0">
                   {!resultadoRules.podeDespachar ? (
                     <span className="text-amber-800 font-medium flex items-center gap-1.5 leading-snug">
                       <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
@@ -1557,7 +1681,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                   ) : (
                     <span className="text-emerald-700 font-medium flex items-center gap-1.5 leading-snug">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                      Todos os requisitos contratuais foram validados.
+                      Requisitos validados! Pressione <kbd className="bg-slate-100 text-slate-800 border border-slate-300 rounded px-1.5 py-0.5 text-[10px] font-mono font-bold shadow-2xs ml-1">Ctrl + Enter</kbd>
                     </span>
                   )}
                 </div>
@@ -1566,9 +1690,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                   type="button"
                   disabled={!resultadoRules.podeDespachar || despachando}
                   onClick={handleDespacharCorrida}
-                  className={`h-11 px-6 rounded-md font-medium text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 shrink-0 whitespace-nowrap ${
+                  className={`h-11 px-6 rounded-lg font-bold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 shrink-0 whitespace-nowrap shadow-sm ${
                     resultadoRules.podeDespachar
-                      ? 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-sm cursor-pointer'
+                      ? 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white cursor-pointer hover:shadow'
                       : 'opacity-50 cursor-not-allowed bg-slate-200 text-slate-500'
                   }`}
                 >
@@ -1581,6 +1705,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                     <>
                       <Car className="w-4 h-4" />
                       AGENDAR CORRIDA NO TÁXI 2.0
+                      <span className="hidden lg:inline text-[10px] font-mono opacity-80 font-normal">
+                        (Ctrl+Enter)
+                      </span>
                     </>
                   )}
                 </button>
@@ -1591,6 +1718,23 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
 
         </div>
       </main>
+
+      {/* FOOTER OFICIAL DE CRÉDITOS */}
+      <footer className="w-full mt-10 py-6 border-t border-slate-200 bg-white">
+        <div className="max-w-[1520px] mx-auto px-4 md:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <span>© {new Date().getFullYear()} Táxi 2.0 • Despacho Corporativo B2B Inteligente</span>
+          </div>
+
+          <div className="flex items-center gap-2.5 font-medium">
+            <span>desenvolvido por <a href="https://agenciatx.ia.br" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">agenciatx.ia.br</a></span>
+            <a href="https://postimg.cc/VdPzdcD6" target="_blank" rel="noopener noreferrer" className="inline-block transition-transform hover:scale-105">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="https://i.postimg.cc/dtL3NsC8/atxia-new-08.png" alt="atxia-new-08" className="h-6 w-auto object-contain border-0" />
+            </a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };
