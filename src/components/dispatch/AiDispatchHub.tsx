@@ -34,6 +34,8 @@ import {
   Radio,
   LogOut,
   AlertTriangle,
+  Users,
+  Shield,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
@@ -42,8 +44,8 @@ import { ClassifierRuleEngine, RegraClassificadorItem, ResultadoRuleEngine } fro
 import { TaxiDigitalApiClient } from '../../lib/taxi-digital/client';
 import { ClassificationRuleValidator } from './ClassificationRuleValidator';
 import { PainelStatusAoVivo } from './PainelStatusAoVivo';
-import { ModalLoginDespachante } from '../auth/ModalLoginDespachante';
-import { DespachanteUsuario, DESPACHANTES_PREDEFINIDOS } from '@/lib/auth/despachantes';
+import { ModalLoginDespachante, UsuarioAutenticado } from '../auth/ModalLoginDespachante';
+import { ModalGerenciarUsuarios } from '../auth/ModalGerenciarUsuarios';
 
 export function formatarTelefoneBR(telefone?: string | null): string {
   if (!telefone) return '';
@@ -413,59 +415,64 @@ export const AiDispatchHub: React.FC = () => {
   const [destinoCoords, setDestinoCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [colandoClipboard, setColandoClipboard] = useState(false);
 
-  // ABAS PRINCIPAIS & AUTENTICAÇÃO DE DESPACHANTES
+  // ABAS PRINCIPAIS & AUTENTICAÇÃO REAL DE DESPACHANTES
   const [abaPrincipal, setAbaPrincipal] = useState<'DESPACHO' | 'STATUS_AO_VIVO'>('DESPACHO');
   const [modalLoginAberto, setModalLoginAberto] = useState(false);
-  const [despachanteAutenticado, setDespachanteAutenticado] = useState<DespachanteUsuario | null>(null);
+  const [despachanteAutenticado, setDespachanteAutenticado] = useState<UsuarioAutenticado | null>(null);
+  const [modalUsuariosAberto, setModalUsuariosAberto] = useState(false);
 
   // ESTADOS DE AUDITORIA & HISTÓRICO (LOG)
   const [modalLogAberto, setModalLogAberto] = useState(false);
-  const [nomeOperador, setNomeOperador] = useState('Eduardo (Gestor Geral)');
+  const [nomeOperador, setNomeOperador] = useState('');
   const [editandoOperador, setEditandoOperador] = useState(false);
   const [historicoLogs, setHistoricoLogs] = useState<AgendamentoLog[]>([]);
   const [filtroLog, setFiltroLog] = useState('');
   const [logSelecionadoParaDetalhes, setLogSelecionadoParaDetalhes] = useState<AgendamentoLog | null>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedAuth = localStorage.getItem('taxi20_auth_session');
-      if (savedAuth) {
-        try {
-          const desp = JSON.parse(savedAuth);
-          setDespachanteAutenticado(desp);
-          setNomeOperador(desp.nome);
-        } catch {}
-      } else {
-        const padrao = DESPACHANTES_PREDEFINIDOS[0];
-        setDespachanteAutenticado(padrao);
-        setNomeOperador(padrao.nome);
-      }
+    // 1. Valida sessão real no servidor via cookie httpOnly
+    fetch('/api/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.autenticado && data.usuario) {
+          setDespachanteAutenticado(data.usuario);
+          setNomeOperador(data.usuario.nome);
+        } else {
+          setDespachanteAutenticado(null);
+          setModalLoginAberto(true);
+        }
+      })
+      .catch(() => {
+        setDespachanteAutenticado(null);
+        setModalLoginAberto(true);
+      });
 
-      const savedLogs = localStorage.getItem('taxi20_historico_agendamentos');
-      if (savedLogs) {
-        try {
-          setHistoricoLogs(JSON.parse(savedLogs));
-        } catch {}
-      }
-    }
+    // 2. Carrega histórico de agendamentos do servidor
+    fetch('/api/dispatch/history')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status && Array.isArray(data.logs)) {
+          setHistoricoLogs(data.logs);
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  const handleLoginSucesso = (desp: DespachanteUsuario) => {
-    setDespachanteAutenticado(desp);
-    setNomeOperador(desp.nome);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('taxi20_auth_session', JSON.stringify(desp));
-      localStorage.setItem('taxi20_operador_atual', desp.nome);
-    }
+  const handleLoginSucesso = (u: UsuarioAutenticado) => {
+    setDespachanteAutenticado(u);
+    setNomeOperador(u.nome);
     setModalLoginAberto(false);
+    toast.success(`Bem-vindo à Central Táxi 2.0, ${u.nome}! (${u.perfil})`);
   };
 
-  const handleLogout = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('taxi20_auth_session');
-    }
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
     setDespachanteAutenticado(null);
+    setNomeOperador('');
     setModalLoginAberto(true);
+    toast.info('Sessão encerrada com sucesso.');
   };
 
   const handleSalvarOperador = (novoNome: string) => {
@@ -791,11 +798,16 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       });
 
       if (!response.ok) {
-        if (response.status === 504) {
-          throw new Error('Tempo limite excedido na nuvem (504). O print foi reotimizado para processamento ultra-rápido. Tente clicar em "Processar com IA" novamente.');
+        let msg = `Erro HTTP ${response.status}`;
+        try {
+          const errorJson = await response.json();
+          msg = errorJson.error || errorJson.message || msg;
+        } catch {
+          if (response.status === 504) {
+            msg = 'Tempo limite excedido na nuvem Vercel (HTTP 504). A chamada ao Gemini demorou mais que o limite do plano da Vercel. Certifique-se de configurar GEMINI_API_KEY e GEMINI_MODEL nas Environment Variables do projeto na Vercel.';
+          }
         }
-        const errorJson = await response.json().catch(() => ({}));
-        throw new Error(errorJson.error || `Erro HTTP ${response.status}`);
+        throw new Error(msg);
       }
 
       const dados: RideExtractionData = await response.json();
@@ -803,9 +815,9 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     } catch (err: any) {
       console.error('Erro na extração de imagem:', err);
       if (err.name === 'AbortError') {
-        toast.error('Tempo limite excedido ao processar print com IA. Tente novamente.');
+        toast.error('Tempo limite esgotado ao aguardar o processamento da imagem.');
       } else {
-        toast.error('Aviso da IA: ' + (err.message || 'Falha ao processar print.'));
+        toast.error(err.message || 'Falha ao processar print com IA.');
       }
     } finally {
       clearTimeout(timeoutId);
@@ -819,7 +831,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
     setResultadoDespacho(null);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 40000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     try {
       const response = await fetch('/api/ai/extract', {
@@ -833,8 +845,16 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => ({}));
-        throw new Error(errorJson.error || `Erro HTTP ${response.status}`);
+        let msg = `Erro HTTP ${response.status}`;
+        try {
+          const errorJson = await response.json();
+          msg = errorJson.error || errorJson.message || msg;
+        } catch {
+          if (response.status === 504) {
+            msg = 'Tempo limite excedido na Vercel (HTTP 504). Verifique as variáveis de ambiente na Vercel.';
+          }
+        }
+        throw new Error(msg);
       }
 
       const dados: RideExtractionData = await response.json();
@@ -844,7 +864,7 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
       if (err.name === 'AbortError') {
         toast.error('Tempo limite excedido ao processar texto.');
       } else {
-        toast.error('Aviso da IA: ' + (err.message || 'Falha ao processar texto.'));
+        toast.error(err.message || 'Falha ao processar texto.');
       }
     } finally {
       clearTimeout(timeoutId);
@@ -1120,6 +1140,17 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
   };
 
   const handleDespacharCorrida = async () => {
+    if (!despachanteAutenticado) {
+      toast.warning('Faça login com um operador autorizado para poder agendar corridas.');
+      setModalLoginAberto(true);
+      return;
+    }
+
+    if (despachanteAutenticado.perfil === 'AUDITOR') {
+      toast.error('Perfil AUDITOR possui permissão apenas de visualização e exportação de logs, não podendo agendar corridas.');
+      return;
+    }
+
     if (!podeDespacharTotal) {
       toast.warning(`Atenção: Existem pendências obrigatórias (${totalPendencias}): ${todasPendencias.join(', ')}.`);
       return;
@@ -1142,13 +1173,21 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
           destino: formDestino,
           classificadores: resultadoRules.classificadoresProntos,
           observacoes: formObservacoes,
-          operador: nomeOperador || 'Operador Central',
+          operador: despachanteAutenticado.nome,
         }),
       });
 
       const res = await response.json().catch(() => ({}));
 
       if (!response.ok || !res.status) {
+        if (response.status === 401) {
+          setDespachanteAutenticado(null);
+          setModalLoginAberto(true);
+          throw new Error('Sessão expirada. Autentique-se novamente.');
+        }
+        if (response.status === 403) {
+          throw new Error(res.error || 'Acesso negado para o seu perfil de usuário.');
+        }
         throw new Error(res.error || 'A central Táxi Digital rejeitou o agendamento.');
       }
 
@@ -1303,6 +1342,17 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
               </div>
             </button>
 
+            {/* Logout */}
+            {despachanteAutenticado && (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="p-1.5 rounded-lg border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                title="Sair do sistema (Logout)"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            )}
 
             {/* Botão Log de Agendamentos Realizados */}
             <button
@@ -1319,6 +1369,19 @@ ${detalhes.centroCusto ? `💼 *Centro de Custo:* ${detalhes.centroCusto}\n` : '
                 </span>
               )}
             </button>
+
+            {/* Botão Gerenciar Usuários (Exclusivo GESTOR) */}
+            {despachanteAutenticado?.perfil === 'GESTOR' && (
+              <button
+                type="button"
+                onClick={() => setModalUsuariosAberto(true)}
+                className="px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Gerenciar usuários e acessos da central (Acesso Gestor)"
+              >
+                <Users className="w-3.5 h-3.5 text-purple-600" />
+                <span className="hidden sm:inline">Usuários</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -2471,7 +2534,12 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
               {/* BOTÃO DE AÇÃO PRIMÁRIA FIXO NA BASE COM VISUAL DOMINANTE E SUPORTE A CTRL + ENTER */}
               <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs py-3 px-4 -mx-4 -mb-4 sm:-mx-5 sm:-mb-5 rounded-b-xl border-t border-slate-200 z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
                 <div className="text-xs text-slate-600 flex-1 min-w-0">
-                  {!podeDespacharTotal ? (
+                  {despachanteAutenticado?.perfil === 'AUDITOR' ? (
+                    <span className="text-purple-700 font-semibold flex items-center gap-1.5 leading-snug">
+                      <Shield className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                      Perfil AUDITOR: Acesso em modo visualização e consulta. Agendamentos bloqueados.
+                    </span>
+                  ) : !podeDespacharTotal ? (
                     <span className="text-amber-800 font-medium flex items-center gap-1.5 leading-snug">
                       <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                       {totalPendencias} {totalPendencias === 1 ? 'campo pendente' : 'campos pendentes'} para envio: {todasPendencias.join(', ')}.
@@ -2486,10 +2554,12 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
 
                 <button
                   type="button"
-                  disabled={!podeDespacharTotal || despachando}
+                  disabled={!podeDespacharTotal || despachando || despachanteAutenticado?.perfil === 'AUDITOR'}
                   onClick={handleDespacharCorrida}
                   className={`h-11 px-6 rounded-lg font-bold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 shrink-0 whitespace-nowrap shadow-sm ${
-                    podeDespacharTotal
+                    despachanteAutenticado?.perfil === 'AUDITOR'
+                      ? 'bg-purple-100 text-purple-700 border border-purple-300 cursor-not-allowed opacity-90'
+                      : podeDespacharTotal
                       ? 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white cursor-pointer hover:shadow'
                       : 'opacity-50 cursor-not-allowed bg-slate-200 text-slate-500'
                   }`}
@@ -2498,6 +2568,11 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
                       Transmitindo...
+                    </>
+                  ) : despachanteAutenticado?.perfil === 'AUDITOR' ? (
+                    <>
+                      <Shield className="w-4 h-4 text-purple-600" />
+                      MODO AUDITORIA (SEM AGENDAMENTO)
                     </>
                   ) : (
                     <>
@@ -2524,6 +2599,13 @@ ${log.valorEstimado ? `💰 *Valor Estimado:* R$ ${log.valorEstimado.toFixed(2)}
         aberto={modalLoginAberto}
         onLoginSucesso={handleLoginSucesso}
         onFechar={() => setModalLoginAberto(false)}
+      />
+
+      {/* MODAL DE GERENCIAMENTO DE USUÁRIOS (EXCLUSIVO GESTOR) */}
+      <ModalGerenciarUsuarios
+        aberto={modalUsuariosAberto}
+        onFechar={() => setModalUsuariosAberto(false)}
+        usuarioLogado={despachanteAutenticado}
       />
 
       {/* FOOTER OFICIAL DE CRÉDITOS */}

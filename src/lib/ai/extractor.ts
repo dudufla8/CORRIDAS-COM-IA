@@ -251,89 +251,47 @@ export class AiDispatchExtractorService {
   }
 
   private async chamarGeminiMultimodal(input: ExtractionInput, dataRef: string): Promise<RideExtractionData> {
-    const configuredModel = process.env.GEMINI_MODEL?.trim();
-    // Prioriza gemini-1.5-flash (ultra-rápido, ~1.5s, suporte universal estável e sem timeout 504 na Vercel),
-    // seguido pelo modelo configurado em env (ex: gemini-3.8-flash) e outros fallbacks rápidos.
-    const priorityModels = [
-      configuredModel === 'gemini-3.8-flash' ? 'gemini-1.5-flash' : (configuredModel || 'gemini-1.5-flash'),
-      'gemini-1.5-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-3.8-flash',
-      'gemini-2.0-flash',
-    ].filter(Boolean) as string[];
+    const configuredModel = (process.env.GEMINI_MODEL || 'gemini-1.5-flash').trim().replace(/^models\//, '');
+    const fallbackModel = configuredModel === 'gemini-1.5-flash' ? 'gemini-1.5-pro' : 'gemini-1.5-flash';
 
-    const modelCandidates = Array.from(new Set(priorityModels.map((m) => m.replace(/^models\//, ''))));
-
+    const modelsToTry = [configuredModel, fallbackModel];
     let lastError: any = null;
-    const errorsLog: string[] = [];
 
-    // Tenta os modelos com timeout curto (5s cada) para nunca estourar o limite de 10-15s da Vercel
-    for (const model of modelCandidates) {
+    for (const model of modelsToTry) {
       try {
-        return await this.executarChamadaGemini(input, dataRef, model, 'v1beta', 5000);
+        console.log(`[Gemini API] Iniciando extração com modelo "${model}" (timeout 20s)...`);
+        return await this.executarChamadaGemini(input, dataRef, model, 20000);
       } catch (err: any) {
         lastError = err;
-        errorsLog.push(`v1beta/${model}: ${err.message}`);
-        console.warn(`[Gemini API] Falha no modelo ${model} (v1beta):`, err.message);
+        console.warn(`[Gemini API] Falha no modelo "${model}":`, err.message);
 
-        // Se for erro de autenticação definitivo, encerra imediatamente
-        if (err.message?.includes('API_KEY_INVALID') || err.message?.includes('PERMISSION_DENIED')) {
-          throw new Error(`Chave do Gemini inválida ou sem permissão de acesso (Google API): ${err.message}`);
-        }
-
-        // Se o erro foi de modelo não encontrado no v1beta, tenta rapidamente no v1 estável
-        if (err.message?.includes('not found') || err.message?.includes('404')) {
-          try {
-            return await this.executarChamadaGemini(input, dataRef, model, 'v1', 4000);
-          } catch (v1Err: any) {
-            errorsLog.push(`v1/${model}: ${v1Err.message}`);
-          }
+        // Se for erro de autenticação/chave, não adianta tentar o fallback
+        if (err.status === 400 || err.status === 401 || err.status === 403 || err.message?.includes('API_KEY_INVALID')) {
+          const authErr = new Error(`Chave do Gemini inválida ou não autorizada: ${err.message}`);
+          (authErr as any).status = 401;
+          (authErr as any).codigo = 'CHAVE_INVALIDA';
+          (authErr as any).details = err.details;
+          throw authErr;
         }
       }
     }
 
-    const mensagemErro = lastError?.message || 'Nenhum modelo da IA Gemini respondeu a tempo.';
-    throw new Error(`${mensagemErro} (Modelos testados: ${modelCandidates.slice(0, 3).join(', ')})`);
-  }
-
-  private async obterModelosDisponiveis(): Promise<string[]> {
-    for (const apiVersion of ['v1beta', 'v1']) {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/${apiVersion}/models?key=${this.apiKey}`,
-          { method: 'GET', headers: { 'Content-Type': 'application/json' } }
-        );
-        if (response.ok) {
-          const json = await response.json();
-          const models: string[] = (json.models || [])
-            .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
-            .map((m: any) => m.name?.replace(/^models\//, ''))
-            .filter(Boolean);
-
-          if (models.length > 0) {
-            return models.sort((a, b) => {
-              const aIsFlash = a.includes('flash') ? 1 : 0;
-              const bIsFlash = b.includes('flash') ? 1 : 0;
-              return bIsFlash - aIsFlash;
-            });
-          }
-        }
-      } catch {
-        // Tenta próxima versão se falhar
-      }
-    }
-    return [];
+    const finalError = new Error(lastError?.message || 'Falha ao processar solicitação no Gemini.');
+    (finalError as any).status = lastError?.status || 500;
+    (finalError as any).codigo = lastError?.codigo || 'ERRO_GEMINI';
+    (finalError as any).details = lastError?.details;
+    (finalError as any).model = lastError?.model;
+    throw finalError;
   }
 
   private async executarChamadaGemini(
     input: ExtractionInput,
     dataRef: string,
     model: string,
-    apiVersion: 'v1beta' | 'v1' = 'v1beta',
-    timeoutMs: number = 5000
+    timeoutMs: number = 20000
   ): Promise<RideExtractionData> {
     const cleanModel = model.replace(/^models\//, '');
-    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${cleanModel}:generateContent?key=${this.apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${this.apiKey}`;
     const parts: any[] = [
       { text: `${SYSTEM_PROMPT_DESPACHO_B2B}\n\nData e hora atual de referência: ${dataRef}` }
     ];
@@ -343,7 +301,6 @@ export class AiDispatchExtractorService {
       const mimeType = match ? match[1] : (input.mimeType || 'image/png');
       const base64Data = input.conteudo.replace(/^data:[^;]+;base64,/, '');
 
-      // A API REST da Google exige "inlineData" com "mimeType" e "data" (camelCase)
       parts.push({
         inlineData: {
           mimeType: mimeType,
@@ -366,6 +323,7 @@ export class AiDispatchExtractorService {
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const t0 = Date.now();
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -373,10 +331,30 @@ export class AiDispatchExtractorService {
         signal: controller.signal
       });
 
+      const durationMs = Date.now() - t0;
       const jsonResp = await response.json();
+
       if (!response.ok || jsonResp.error) {
-        throw new Error(jsonResp.error?.message || `Erro da API Gemini (${model}): ${response.statusText}`);
+        const errorBody = jsonResp.error || jsonResp;
+        console.error(`[Gemini API Erro Servidor] Modelo: ${model} | HTTP ${response.status} (${durationMs}ms):`, JSON.stringify(errorBody, null, 2));
+
+        let userMsg = errorBody.message || `Erro da API Gemini (${model}): HTTP ${response.status}`;
+        if (response.status === 404 || errorBody.message?.includes('not found')) {
+          userMsg = `O modelo de IA "${model}" não foi encontrado ou não está disponível para esta chave. Configure GEMINI_MODEL com um modelo válido na Vercel.`;
+        } else if (response.status === 400 && errorBody.message?.includes('API key not valid')) {
+          userMsg = 'Chave do Gemini inválida. Configure GEMINI_API_KEY corretamente nas variáveis de ambiente da Vercel.';
+        } else if (response.status === 429) {
+          userMsg = 'Limite de cota da API do Gemini excedido (Rate Limit / Quota Exceeded). Aguarde alguns instantes.';
+        }
+
+        const err = new Error(userMsg);
+        (err as any).status = response.status;
+        (err as any).details = errorBody;
+        (err as any).model = model;
+        throw err;
       }
+
+      console.log(`[Gemini API Sucesso] Modelo: ${model} | Duração: ${durationMs}ms`);
 
       const rawText = jsonResp.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!rawText) {

@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { obterTodasCorridas, registrarNovaCorrida, atualizarStatusViaWebhook } from '@/lib/taxi-digital/store';
+import { obterSessaoDeRequest } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const session = await obterSessaoDeRequest(req);
+    if (!session) {
+      return NextResponse.json({ status: false, error: 'Acesso não autorizado.' }, { status: 401 });
+    }
+
     const corridas = obterTodasCorridas();
     return NextResponse.json({
       status: true,
@@ -42,6 +48,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await obterSessaoDeRequest(req);
+    if (!session) {
+      return NextResponse.json({ status: false, error: 'Acesso não autorizado.' }, { status: 401 });
+    }
+
     const body = await req.json();
     if (!body || (!body.bookingId && !body.voucher)) {
       return NextResponse.json({ status: false, error: 'Dados de corrida/log inválidos' }, { status: 400 });
@@ -82,8 +93,8 @@ export async function POST(req: NextRequest) {
       motoristaTelefone: body.motoristaTelefone,
       veiculoPlaca: body.veiculoPlaca,
       veiculoModelo: body.veiculoModelo,
-      operador: body.operador || 'Operador Central',
-      operadorEmail: body.operadorEmail,
+      operador: session.nome,
+      operadorEmail: session.login,
       classificadores: body.classificadores,
       observacoes: body.observacoes,
     });

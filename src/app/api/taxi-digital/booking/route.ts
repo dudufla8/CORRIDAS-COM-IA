@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { obterSessaoDeRequest } from '@/lib/auth/session';
+import { prisma } from '@/lib/prisma';
 
 interface ContratoConfig {
   uiCliente: string;
@@ -121,6 +123,24 @@ async function geocodificarEndereco(endereco: string) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await obterSessaoDeRequest(req);
+    if (!session) {
+      return NextResponse.json(
+        { status: false, error: 'Acesso não autorizado. É obrigatório estar autenticado para realizar agendamentos.' },
+        { status: 401 }
+      );
+    }
+
+    if (session.perfil === 'AUDITOR') {
+      return NextResponse.json(
+        {
+          status: false,
+          error: 'Perfil AUDITOR possui permissão apenas de visualização e exportação de relatórios, não podendo realizar agendamentos.',
+        },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const {
       contratoId,
@@ -134,8 +154,9 @@ export async function POST(req: NextRequest) {
       classificadores = {},
       observacoes = '',
       categoryId: categoryIdFromBody,
-      operador = 'Operador Central',
     } = body;
+
+    const operador = session.nome;
 
     const baseUrl = process.env.TAXI_DIGITAL_BASE_URL || 'https://api.taxidigital.net/APITD';
     const usuario = process.env.TAXI_DIGITAL_USER || 'apitx20@tx20.com.br';
@@ -364,6 +385,41 @@ export async function POST(req: NextRequest) {
 
     const bookingId = String(addData.booking_code || addData.booking_id || addData.data || '');
 
+    // Auditoria obrigatória no banco de dados vinculando o usuário autenticado
+    try {
+      const contrato = await prisma.contrato.findFirst({
+        where: { uiClienteTaxiDigital: contratoConfig.uiCliente },
+      });
+
+      if (contrato) {
+        await prisma.historicoCorrida.create({
+          data: {
+            contratoId: contrato.id,
+            bookingIdTaxiDigital: bookingId,
+            voucherCodigo: cleanVoucher,
+            canalEntrada: 'MANUAL_ASSISTIDO',
+            statusCorrida: 'AGENDADO_TAXI_DIGITAL',
+            passageiroNome: passageiroNome || 'Colaborador',
+            passageiroTelefone: telLimpo,
+            dataHoraAgendamento: new Date(),
+            chamadaImediata: !isAgendada,
+            origemEnderecoCompleto: origem,
+            origemLatitude: coordsOrigem.lat,
+            origemLongitude: coordsOrigem.lng,
+            destinoEnderecoCompleto: destino || '',
+            destinoLatitude: coordsDestino?.lat,
+            destinoLongitude: coordsDestino?.lng,
+            observacoes: observacoes,
+            classificadores: classificadores,
+            operadorResponsavel: session.nome,
+            usuarioId: session.id,
+          },
+        });
+      }
+    } catch (auditErr) {
+      console.warn('[Auditoria] Falha ao persistir agendamento no banco:', auditErr);
+    }
+
     return NextResponse.json({
       status: true,
       booking_id: bookingId,
@@ -371,6 +427,8 @@ export async function POST(req: NextRequest) {
       status_corrida: isAgendada ? 'AGENDADA' : 'EM_DESPACHO',
       register_date: addData.register_date,
       message: addData.message || 'Corrida agendada com sucesso na rede Táxi Digital.',
+      operador: session.nome,
+      usuarioId: session.id,
     });
   } catch (error: any) {
     console.error('[Booking Route Error]', error);

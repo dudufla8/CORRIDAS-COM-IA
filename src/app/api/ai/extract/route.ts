@@ -17,7 +17,18 @@ export async function POST(req: NextRequest) {
     }
 
     const headerKey = req.headers.get('x-gemini-key') || '';
-    const keyToUse = process.env.GEMINI_API_KEY || customApiKey || headerKey || '';
+    const keyToUse = (process.env.GEMINI_API_KEY || customApiKey || headerKey || '').trim();
+
+    if (!keyToUse || keyToUse.includes('...') || keyToUse.length < 20) {
+      console.error('[API /api/ai/extract] Chave GEMINI_API_KEY ausente ou inválida no servidor.');
+      return NextResponse.json(
+        {
+          error: 'Chave do Google Gemini (GEMINI_API_KEY) ausente ou inválida nas variáveis de ambiente da Vercel.',
+          codigo: 'CHAVE_AUSENTE_OU_INVALIDA',
+        },
+        { status: 401 }
+      );
+    }
 
     const extractor = new AiDispatchExtractorService(keyToUse);
     const resultado = await extractor.extrairSolicitacaoCorrida({
@@ -29,10 +40,20 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(resultado);
   } catch (error: any) {
-    console.error('Erro no endpoint de extração por IA:', error);
+    const status = error.status || 500;
+    const mensagem = error.message || 'Falha ao processar solicitação com IA.';
+    console.error(`[API /api/ai/extract] Erro (${status}):`, {
+      message: mensagem,
+      details: error.details || null,
+      model: error.model || null,
+    });
     return NextResponse.json(
-      { error: error.message || 'Falha interna ao processar IA multimodal.' },
-      { status: 500 }
+      {
+        error: mensagem,
+        codigo: error.codigo || 'ERRO_EXTRACAO',
+        detalhes: error.details || null,
+      },
+      { status }
     );
   }
 }
